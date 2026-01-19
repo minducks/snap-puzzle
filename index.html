@@ -1,0 +1,907 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Cluster Image Puzzle</title>
+  <style>
+    html, body { margin:0; height:100%; background:#0f0f10; color:#eee; font-family:system-ui, sans-serif; }
+    .app { height:100%; display:flex; align-items:center; justify-content:center; padding:16px; box-sizing:border-box; }
+    .stage { position:relative; width:min(720px, 96vw); }
+    canvas { width:100%; height:auto; display:block; background:#000; border:1px solid #2a2a2a; border-radius:12px; }
+
+    .overlay {
+      position:absolute; inset:0;
+      display:flex; align-items:center; justify-content:center;
+      pointer-events:none;
+    }
+    .panel {
+      pointer-events:auto;
+      background:rgba(10,10,12,0.72);
+      border:1px solid rgba(255,255,255,0.12);
+      border-radius:16px;
+      padding:18px 18px;
+      min-width:min(360px, 86%);
+      text-align:center;
+      backdrop-filter: blur(6px);
+    }
+    .title {
+      font-size:28px; font-weight:800; letter-spacing:0.5px;
+      margin:0 0 6px 0;
+    }
+    .lv {
+      font-size:14px; opacity:0.92; margin:0 0 10px 0;
+    }
+    .sub {
+      font-size:14px; opacity:0.9; margin:0 0 14px 0; line-height:1.4;
+    }
+    .btn {
+      appearance:none; border:0;
+      background:#ffffff; color:#111;
+      padding:12px 16px;
+      border-radius:12px;
+      font-weight:800;
+      cursor:pointer;
+      width:100%;
+    }
+    .btn:hover { filter:brightness(0.95); }
+    .btn:active { transform: translateY(1px); }
+  </style>
+</head>
+<body>
+<div class="app">
+  <div class="stage">
+    <canvas id="c" width="720" height="720"></canvas>
+
+    <div class="overlay" id="overlay" style="display:none;">
+      <div class="panel">
+        <div class="title">CLEAR!</div>
+        <div class="lv" id="lvText">Level 1</div>
+        <p class="sub">다음 레벨로 진행할 수 있어요</p>
+        <button class="btn" id="nextBtn">다음 레벨</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const canvas = document.getElementById("c");
+  const ctx = canvas.getContext("2d");
+
+  const overlayEl = document.getElementById("overlay");
+  const nextBtn = document.getElementById("nextBtn");
+  const lvText = document.getElementById("lvText");
+
+  // ----------------------------
+  // Image pool (./images/ 폴더에 넣어두기)
+  // ----------------------------
+  const IMAGE_POOL = [
+    "images/01.jpg",
+    "images/02.jpg",
+    "images/03.jpg",
+    "images/04.jpg",
+    "images/05.jpg",
+    "images/06.jpg",
+    "images/07.jpg",
+    "images/08.jpg",
+  ];
+
+  // ----------------------------
+  // Level difficulty curve
+  // 1: 2x2
+  // 2: 3x3
+  // 3: 3x3
+  // 4~9: 4x4
+  // 10~19: 5x5
+  // 20+: 6x6
+  // ----------------------------
+  let level = 1;
+  function getNForLevel(lv){
+    if (lv === 1) return 2;
+    if (lv === 2 || lv === 3) return 3;
+    if (lv >= 4 && lv <= 9) return 4;
+    if (lv >= 10 && lv <= 19) return 5;
+    return 6;
+  }
+
+  // ----------------------------
+  // Rendering config (각진 타일)
+  // ----------------------------
+  let N = getNForLevel(level);
+  const PADDING = 12;
+  const TILE_GAP = 2;
+  const DRAG_ALPHA = 0.98;
+
+  // ----------------------------
+  // Start hint (원본 희미하게 0.8초)
+  // ----------------------------
+  const START_HINT_SEC = 0.8;
+  let hintTimer = 0; // seconds remaining
+
+  // ----------------------------
+  // Image source (cropped square)
+  // ----------------------------
+  let sourceImage = null;       // offscreen canvas
+  let isLoading = false;
+
+  // ----------------------------
+  // Board model: board[pos] = tileId
+  // ----------------------------
+  let board = [];
+  let solved = [];
+
+  // Drag cluster state
+  let dragging = null;
+
+  // ----------------------------
+  // Pop animation per tileId
+  // ----------------------------
+  const tilePop = new Map();
+  const POP_DUR = 0.12;
+  const POP_MAG = 0.06;
+
+  // ----------------------------
+  // Fireworks particles on clear
+  // ----------------------------
+  let fireworks = []; // {x,y,vx,vy,life,maxLife,size}
+  let didClearFx = false;
+
+  function spawnFireworks(){
+    const W = canvas.width, H = canvas.height;
+    const cx = W/2, cy = H/2;
+
+    const bursts = 8;
+    for (let b=0; b<bursts; b++){
+      const bx = cx + (Math.random()*160 - 80);
+      const by = cy + (Math.random()*120 - 60);
+
+      const count = 24 + Math.floor(Math.random()*14);
+      for (let i=0;i<count;i++){
+        const ang = Math.random()*Math.PI*2;
+        const sp = 120 + Math.random()*180;
+        fireworks.push({
+          x: bx,
+          y: by,
+          vx: Math.cos(ang)*sp,
+          vy: Math.sin(ang)*sp,
+          life: 0,
+          maxLife: 0.75 + Math.random()*0.45,
+          size: 1.2 + Math.random()*1.8
+        });
+      }
+    }
+  }
+
+  // ----------------------------
+  // SFX (WebAudio)
+  // ----------------------------
+  let audioCtx = null;
+  function ensureAudio(){
+    if (!audioCtx){
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audioCtx.state === "suspended") audioCtx.resume();
+  }
+
+  // 착붙: 크리링~
+  function playChime(){
+    try{
+      ensureAudio();
+      const t0 = audioCtx.currentTime;
+      const notes = [
+        { f: 1568, t: 0.00, d: 0.10 },
+        { f: 1319, t: 0.07, d: 0.12 },
+      ];
+      for (const n of notes){
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(n.f, t0 + n.t);
+
+        gain.gain.setValueAtTime(0.0001, t0 + n.t);
+        gain.gain.exponentialRampToValueAtTime(0.18, t0 + n.t + 0.015);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t0 + n.t + n.d);
+
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start(t0 + n.t);
+        osc.stop(t0 + n.t + n.d + 0.02);
+      }
+    } catch {}
+  }
+
+  // 클리어: 뾰로롱~
+  function playClear(){
+    try{
+      ensureAudio();
+      const t0 = audioCtx.currentTime;
+
+      const seq = [
+        { f: 1046.5, t: 0.00, d: 0.12 }, // C6
+        { f: 1318.5, t: 0.10, d: 0.12 }, // E6
+        { f: 1568.0, t: 0.20, d: 0.14 }, // G6
+        { f: 2093.0, t: 0.34, d: 0.18 }, // C7
+      ];
+
+      for (const n of seq){
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = "triangle";
+        osc.frequency.setValueAtTime(n.f, t0 + n.t);
+
+        gain.gain.setValueAtTime(0.0001, t0 + n.t);
+        gain.gain.exponentialRampToValueAtTime(0.22, t0 + n.t + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t0 + n.t + n.d);
+
+        // 가벼운 반짝임 느낌
+        osc.detune.setValueAtTime(-6, t0 + n.t);
+        osc.detune.linearRampToValueAtTime(6, t0 + n.t + n.d);
+
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start(t0 + n.t);
+        osc.stop(t0 + n.t + n.d + 0.03);
+      }
+    } catch {}
+  }
+
+  // ----------------------------
+  // Helpers
+  // ----------------------------
+  function idx(r,c){ return r*N + c; }
+  function rc(pos){ return { r: Math.floor(pos / N), c: pos % N }; }
+
+  function resetBoard(){
+    solved = Array.from({length:N*N}, (_,i)=>i);
+    board = solved.slice();
+  }
+
+  function shuffleBoard(){
+    for (let i = board.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [board[i], board[j]] = [board[j], board[i]];
+    }
+    if (isSolved()) shuffleBoard();
+  }
+
+  function isSolved(){
+    for (let i=0;i<board.length;i++){
+      if (board[i] !== solved[i]) return false;
+    }
+    return true;
+  }
+
+  function boardRect(){
+    const W = canvas.width, H = canvas.height;
+    const size = Math.min(W,H) - PADDING*2;
+    return { x:(W-size)/2, y:(H-size)/2, size };
+  }
+
+  function posFromPoint(px, py){
+    const br = boardRect();
+    if (px < br.x || py < br.y || px > br.x+br.size || py > br.y+br.size) return null;
+    const cell = br.size / N;
+    const c = Math.floor((px - br.x) / cell);
+    const r = Math.floor((py - br.y) / cell);
+    const p = r*N + c;
+    return (p>=0 && p<N*N) ? p : null;
+  }
+
+  function drawTile(tileId, dx, dy, dw, dh){
+    const img = sourceImage;
+    const tileW = img.width / N;
+    const tileH = img.height / N;
+    const sr = Math.floor(tileId / N);
+    const sc = tileId % N;
+    const sx = sc * tileW;
+    const sy = sr * tileH;
+    ctx.drawImage(img, sx, sy, tileW, tileH, dx, dy, dw, dh);
+  }
+
+  // ----------------------------
+  // Cluster lock detection
+  // ----------------------------
+  function isLockedAdj(posA, posB, dir){
+    const idA = board[posA];
+    const idB = board[posB];
+    const a = { r: Math.floor(idA / N), c: idA % N };
+    const b = { r: Math.floor(idB / N), c: idB % N };
+    return (b.r === a.r + dir.dr) && (b.c === a.c + dir.dc);
+  }
+
+  function getCluster(anchorPos){
+    const visited = new Set();
+    const q = [anchorPos];
+    visited.add(anchorPos);
+    const dirs = [
+      {dr:-1,dc:0},{dr:1,dc:0},{dr:0,dc:-1},{dr:0,dc:1}
+    ];
+    while (q.length){
+      const p = q.shift();
+      const { r, c } = rc(p);
+      for (const d of dirs){
+        const nr = r + d.dr, nc = c + d.dc;
+        if (nr<0||nr>=N||nc<0||nc>=N) continue;
+        const np = idx(nr,nc);
+        if (visited.has(np)) continue;
+        if (isLockedAdj(p, np, d)){
+          visited.add(np);
+          q.push(np);
+        }
+      }
+    }
+    const aRC = rc(anchorPos);
+    const members = Array.from(visited).map(pos => {
+      const prc = rc(pos);
+      return { pos, tileId: board[pos], offR: prc.r - aRC.r, offC: prc.c - aRC.c };
+    });
+    members.sort((m1,m2) => (m1.offR - m2.offR) || (m1.offC - m2.offC));
+    return members;
+  }
+
+  function clusterFitsAt(members, anchorPos){
+    const aRC = rc(anchorPos);
+    for (const m of members){
+      const rr = aRC.r + m.offR;
+      const cc = aRC.c + m.offC;
+      if (rr<0||rr>=N||cc<0||cc>=N) return false;
+    }
+    return true;
+  }
+
+  // overlap-safe move (no duplication)
+  function applyClusterMoveOverlapSafe(members, toAnchorPos){
+    const old = board.slice();
+    const srcPositions = members.map(m => m.pos);
+    const aRC = rc(toAnchorPos);
+    const dstPositions = members.map(m => idx(aRC.r + m.offR, aRC.c + m.offC));
+
+    const srcSet = new Set(srcPositions);
+    const dstSet = new Set(dstPositions);
+
+    const next = board.slice();
+
+    // 1) move cluster
+    for (let i=0;i<members.length;i++){
+      next[dstPositions[i]] = old[srcPositions[i]];
+    }
+
+    // 2) move external tiles from dst\src into vacated src\dst
+    const vacated = [];
+    const displaced = [];
+    for (let i=0;i<members.length;i++){
+      const sp = srcPositions[i];
+      const dp = dstPositions[i];
+      if (!dstSet.has(sp)) vacated.push(sp);
+      if (!srcSet.has(dp)) displaced.push(old[dp]);
+    }
+    const k = Math.min(vacated.length, displaced.length);
+    for (let i=0;i<k;i++){
+      next[vacated[i]] = displaced[i];
+    }
+
+    board = next;
+  }
+
+  // ----------------------------
+  // 착붙 조건 변경: "클러스터가 커졌을 때만" 효과/사운드
+  // - 이동 전/후 '락 그래프' 컴포넌트 크기를 비교해서 증가한 경우만 트리거
+  // ----------------------------
+  function buildLockAdjList(){
+    const adj = Array.from({length:N*N}, () => []);
+    const dirs = [
+      {dr:-1,dc:0},{dr:1,dc:0},{dr:0,dc:-1},{dr:0,dc:1}
+    ];
+    for (let r=0;r<N;r++){
+      for (let c=0;c<N;c++){
+        const p = idx(r,c);
+        for (const d of dirs){
+          const nr = r + d.dr, nc = c + d.dc;
+          if (nr<0||nr>=N||nc<0||nc>=N) continue;
+          const q = idx(nr,nc);
+          // 양방향으로 넣되, 중복은 괜찮음(컴포넌트 탐색에서 visited로 처리)
+          if (isLockedAdj(p, q, d)){
+            adj[p].push(q);
+          }
+        }
+      }
+    }
+    return adj;
+  }
+
+  function computeComponents(adj){
+    const visited = new Array(N*N).fill(false);
+    const compId = new Array(N*N).fill(-1);
+    const compSizes = [];
+    let cid = 0;
+
+    for (let i=0;i<N*N;i++){
+      if (visited[i]) continue;
+      // BFS
+      const q = [i];
+      visited[i] = true;
+      compId[i] = cid;
+      let size = 0;
+
+      while (q.length){
+        const p = q.shift();
+        size++;
+        for (const nb of adj[p]){
+          if (!visited[nb]){
+            visited[nb] = true;
+            compId[nb] = cid;
+            q.push(nb);
+          }
+        }
+      }
+
+      compSizes[cid] = size;
+      cid++;
+    }
+
+    return { compId, compSizes };
+  }
+
+  function triggerPop(tileIds){
+    if (tileIds.size === 0) return;
+    for (const id of tileIds){
+      tilePop.set(id, POP_DUR);
+    }
+    playChime();
+  }
+
+  // ----------------------------
+  // Pop / Fireworks rendering helpers
+  // ----------------------------
+  function popScaleForTile(tileId){
+    const t = tilePop.get(tileId);
+    if (!t) return 1;
+    const a = Math.max(0, Math.min(1, 1 - (t / POP_DUR)));
+    const s = Math.sin(a * Math.PI);
+    return 1 + POP_MAG * s;
+  }
+
+  function renderFireworks(dt){
+    if (fireworks.length === 0) return;
+
+    const g = 520; // gravity px/s^2
+    for (const p of fireworks){
+      p.life += dt;
+      p.vy += g * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+
+      // damping
+      p.vx *= (1 - 1.2*dt);
+      p.vy *= (1 - 0.2*dt);
+    }
+
+    fireworks = fireworks.filter(p => p.life < p.maxLife);
+
+    // draw
+    ctx.save();
+    for (const p of fireworks){
+      const t = p.life / p.maxLife; // 0..1
+      const a = Math.max(0, 1 - t);
+
+      // 간단히 화이트/약간의 색감 섞어서 "폭죽" 느낌
+      const twinkle = 0.6 + 0.4*Math.sin((p.life*18) + (p.x+p.y)*0.01);
+      ctx.globalAlpha = a * twinkle;
+      ctx.fillStyle = (Math.random() < 0.08) ? "rgba(255,220,140,1)" : "rgba(255,255,255,1)";
+      ctx.fillRect(p.x, p.y, p.size, p.size);
+    }
+    ctx.restore();
+  }
+
+  // ----------------------------
+  // Render
+  // ----------------------------
+  function render(dt){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+
+    ctx.fillStyle = "#0b0b0c";
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+
+    if (!sourceImage){
+      ctx.fillStyle = "rgba(255,255,255,0.85)";
+      ctx.font = "16px system-ui, sans-serif";
+      ctx.fillText(isLoading ? "Loading..." : "No image", 18, 26);
+      return;
+    }
+
+    const br = boardRect();
+    ctx.fillStyle = "#121214";
+    ctx.fillRect(br.x-2, br.y-2, br.size+4, br.size+4);
+
+    const cell = br.size / N;
+
+    // 레벨 시작 힌트 (0.8초): 원본을 아주 희미하게 깔아줌
+    if (hintTimer > 0){
+      const alpha = Math.min(0.22, (hintTimer / START_HINT_SEC) * 0.22);
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.drawImage(sourceImage, br.x, br.y, br.size, br.size);
+      ctx.restore();
+    }
+
+    const draggingPosSet = new Set(dragging ? dragging.members.map(m => m.pos) : []);
+
+    // tiles
+    for (let pos=0; pos<N*N; pos++){
+      if (draggingPosSet.has(pos)) continue;
+
+      const tileId = board[pos];
+      const { r, c } = rc(pos);
+      const x0 = br.x + c*cell + TILE_GAP/2;
+      const y0 = br.y + r*cell + TILE_GAP/2;
+      const w0 = cell - TILE_GAP;
+      const h0 = cell - TILE_GAP;
+
+      const s = popScaleForTile(tileId);
+      const cx = x0 + w0/2;
+      const cy = y0 + h0/2;
+      const w = w0 * s;
+      const h = h0 * s;
+
+      ctx.save();
+      ctx.translate(cx - w/2, cy - h/2);
+      drawTile(tileId, 0, 0, w, h);
+      ctx.restore();
+
+      ctx.strokeStyle = "rgba(255,255,255,0.06)";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x0+0.5, y0+0.5, w0-1, h0-1);
+    }
+
+    // dragging cluster
+    if (dragging){
+      const baseX = dragging.mouseX - dragging.grabDX;
+      const baseY = dragging.mouseY - dragging.grabDY;
+
+      // hover guide
+      if (dragging.hoverAnchorPos != null && dragging.fits){
+        const aRC = rc(dragging.hoverAnchorPos);
+        ctx.save();
+        ctx.globalAlpha = 0.14;
+        ctx.fillStyle = "#ffffff";
+        for (const m of dragging.members){
+          const rr = aRC.r + m.offR;
+          const cc = aRC.c + m.offC;
+          const x = br.x + cc*cell + TILE_GAP/2;
+          const y = br.y + rr*cell + TILE_GAP/2;
+          ctx.fillRect(x, y, cell - TILE_GAP, cell - TILE_GAP);
+        }
+        ctx.restore();
+      }
+
+      // shadow
+      ctx.save();
+      ctx.globalAlpha = 0.28;
+      ctx.fillStyle = "#000";
+      for (const m of dragging.members){
+        const x = baseX + m.offC*cell + 6;
+        const y = baseY + m.offR*cell + 8;
+        ctx.fillRect(x, y, cell - TILE_GAP, cell - TILE_GAP);
+      }
+      ctx.restore();
+
+      // tiles
+      ctx.save();
+      ctx.globalAlpha = DRAG_ALPHA;
+      for (const m of dragging.members){
+        const x = baseX + m.offC*cell;
+        const y = baseY + m.offR*cell;
+        drawTile(m.tileId, x, y, cell - TILE_GAP, cell - TILE_GAP);
+        ctx.strokeStyle = "rgba(255,255,255,0.18)";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x+0.5, y+0.5, (cell - TILE_GAP)-1, (cell - TILE_GAP)-1);
+      }
+      ctx.restore();
+    }
+
+    // fireworks on top
+    renderFireworks(dt);
+  }
+
+  // ----------------------------
+  // Game loop
+  // ----------------------------
+  let last = performance.now();
+  function loop(now){
+    const dt = Math.min(0.033, (now - last)/1000);
+    last = now;
+
+    // decay pop timers
+    for (const [id, t] of tilePop.entries()){
+      const nt = t - dt;
+      if (nt <= 0) tilePop.delete(id);
+      else tilePop.set(id, nt);
+    }
+
+    // hint timer
+    if (hintTimer > 0) hintTimer = Math.max(0, hintTimer - dt);
+
+    render(dt);
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+  // ----------------------------
+  // Input (mouse + touch)
+  // ----------------------------
+  function getCanvasPoint(evt){
+    const rect = canvas.getBoundingClientRect();
+    const isTouch = evt.touches && evt.touches.length;
+    const clientX = isTouch ? evt.touches[0].clientX : evt.clientX;
+    const clientY = isTouch ? evt.touches[0].clientY : evt.clientY;
+    const x = (clientX - rect.left) * (canvas.width / rect.width);
+    const y = (clientY - rect.top) * (canvas.height / rect.height);
+    return { x, y };
+  }
+
+  function onDown(evt){
+    if (!sourceImage || isLoading) return;
+    ensureAudio(); // 모바일 오디오 unlock
+    const p = getCanvasPoint(evt);
+    const pos = posFromPoint(p.x, p.y);
+    if (pos == null) return;
+
+    const members = getCluster(pos);
+
+    const br = boardRect();
+    const cell = br.size / N;
+    const { r, c } = rc(pos);
+    const gx = br.x + c*cell + TILE_GAP/2;
+    const gy = br.y + r*cell + TILE_GAP/2;
+
+    dragging = {
+      anchorPos: pos,
+      members,
+      mouseX: p.x,
+      mouseY: p.y,
+      grabDX: (p.x - gx),
+      grabDY: (p.y - gy),
+      hoverAnchorPos: pos,
+      fits: true
+    };
+
+    evt.preventDefault();
+  }
+
+  function onMove(evt){
+    if (!dragging) return;
+    const p = getCanvasPoint(evt);
+    dragging.mouseX = p.x;
+    dragging.mouseY = p.y;
+
+    const hoverPos = posFromPoint(p.x, p.y);
+    dragging.hoverAnchorPos = hoverPos;
+    dragging.fits = (hoverPos != null) ? clusterFitsAt(dragging.members, hoverPos) : false;
+
+    evt.preventDefault();
+  }
+
+  function onUp(evt){
+    if (!dragging) return;
+    const p = getCanvasPoint(evt);
+    const dropAnchorPos = posFromPoint(p.x, p.y);
+
+    // --- cluster growth detection BEFORE move
+    const beforeAdj = buildLockAdjList();
+    const before = computeComponents(beforeAdj);
+
+    // remember which tiles were dragged (by tileId)
+    const draggedTileIds = new Set(dragging.members.map(m => m.tileId));
+
+    if (dropAnchorPos != null &&
+        dropAnchorPos !== dragging.anchorPos &&
+        clusterFitsAt(dragging.members, dropAnchorPos)) {
+
+      applyClusterMoveOverlapSafe(dragging.members, dropAnchorPos);
+    }
+
+    dragging = null;
+
+    // --- cluster growth detection AFTER move
+    const afterAdj = buildLockAdjList();
+    const after = computeComponents(afterAdj);
+
+    // Determine if any dragged tile ended up in a bigger component than before.
+    // If yes -> "착붙" 트리거 + pop for tiles in that grown component(s)
+    let grew = false;
+    const popIds = new Set();
+
+    // Map tileId -> current position
+    const tileIdToPos = new Map();
+    for (let pos=0; pos<N*N; pos++) tileIdToPos.set(board[pos], pos);
+
+    for (const tileId of draggedTileIds){
+      const posNow = tileIdToPos.get(tileId);
+      if (posNow == null) continue;
+
+      const cidAfter = after.compId[posNow];
+      const sizeAfter = after.compSizes[cidAfter] || 1;
+
+      // to compare, we need this tileId's previous position before move:
+      // easiest: rebuild from "before" board snapshot? but we didn't store it.
+      // 대신 "성장 조건"을 '움직인 이후 컴포넌트가 2 이상' AND '움직인 타일들 중 최소 하나가 새로 연결된 컴포넌트에 속함'으로 판정.
+      // 보다 확실히 하려면 "이동 전 보드 스냅샷"을 저장해야 함.
+    }
+
+    // ✅ 확실한 성장 판정: 이동 전 보드를 스냅샷으로 저장해서 비교
+    // (위에서 이미 before를 만들었으니, 여기서 추가로 "이동 전 board"를 보관하는 방식으로 구현)
+    // 간단히: onUp 시작에 oldBoard를 저장해두고, 이동 후 타일Id의 이전 pos를 찾자.
+  }
+
+  // 위 onUp을 "스냅샷 비교"로 다시 정의(안전)
+  function onUpFixed(evt){
+    if (!dragging) return;
+    const p = getCanvasPoint(evt);
+    const dropAnchorPos = posFromPoint(p.x, p.y);
+
+    const oldBoard = board.slice();
+    const draggedTileIds = new Set(dragging.members.map(m => m.tileId));
+
+    // before components on oldBoard
+    const beforeInfo = (() => {
+      const saved = board;
+      board = oldBoard; // temporarily point board to oldBoard for lock checks
+      const adj = buildLockAdjList();
+      const info = computeComponents(adj);
+      board = saved;
+      return info;
+    })();
+
+    // do move
+    if (dropAnchorPos != null &&
+        dropAnchorPos !== dragging.anchorPos &&
+        clusterFitsAt(dragging.members, dropAnchorPos)) {
+      applyClusterMoveOverlapSafe(dragging.members, dropAnchorPos);
+    }
+
+    dragging = null;
+
+    // after components on current board
+    const afterAdj = buildLockAdjList();
+    const afterInfo = computeComponents(afterAdj);
+
+    // build tileId -> pos maps (before/after)
+    const beforePos = new Map();
+    for (let pos=0; pos<N*N; pos++) beforePos.set(oldBoard[pos], pos);
+    const afterPos = new Map();
+    for (let pos=0; pos<N*N; pos++) afterPos.set(board[pos], pos);
+
+    let grew = false;
+    const compsToPop = new Set(); // component ids after that grew
+    for (const tileId of draggedTileIds){
+      const pBefore = beforePos.get(tileId);
+      const pAfter = afterPos.get(tileId);
+      if (pBefore == null || pAfter == null) continue;
+
+      const cBefore = beforeInfo.compId[pBefore];
+      const sBefore = beforeInfo.compSizes[cBefore] || 1;
+
+      const cAfter = afterInfo.compId[pAfter];
+      const sAfter = afterInfo.compSizes[cAfter] || 1;
+
+      if (sAfter > sBefore){
+        grew = true;
+        compsToPop.add(cAfter);
+      }
+    }
+
+    if (grew){
+      // pop tiles in those grown comps
+      const popTileIds = new Set();
+      for (let pos=0; pos<N*N; pos++){
+        const cid = afterInfo.compId[pos];
+        if (compsToPop.has(cid)){
+          popTileIds.add(board[pos]);
+        }
+      }
+      for (const id of popTileIds) tilePop.set(id, POP_DUR);
+      playChime();
+    }
+
+    // solved?
+    if (isSolved() && !didClearFx){
+      didClearFx = true;
+      lvText.textContent = `Level ${level}`;
+      overlayEl.style.display = "flex";
+      spawnFireworks();
+      playClear(); // ✅ 클리어 사운드
+    }
+
+    evt.preventDefault();
+  }
+
+  // hook events (use fixed onUp)
+  canvas.addEventListener("mousedown", onDown);
+  window.addEventListener("mousemove", onMove);
+  window.addEventListener("mouseup", onUpFixed);
+
+  canvas.addEventListener("touchstart", onDown, { passive:false });
+  window.addEventListener("touchmove", onMove, { passive:false });
+  window.addEventListener("touchend", onUpFixed, { passive:false });
+
+  // ----------------------------
+  // Level flow + image loading
+  // ----------------------------
+  function centerCropToSquare(img, size=1024){
+    const off = document.createElement("canvas");
+    off.width = off.height = size;
+    const g = off.getContext("2d");
+    const iw = img.naturalWidth, ih = img.naturalHeight;
+    const s = Math.min(iw, ih);
+    const sx = (iw - s) / 2;
+    const sy = (ih - s) / 2;
+    g.drawImage(img, sx, sy, s, s, 0, 0, size, size);
+    return off;
+  }
+
+  async function loadImageToSource(url){
+    isLoading = true;
+    overlayEl.style.display = "none";
+
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        sourceImage = centerCropToSquare(img, 1024);
+        isLoading = false;
+        resolve(true);
+      };
+      img.onerror = () => {
+        // fallback
+        const fallback = document.createElement("canvas");
+        fallback.width = fallback.height = 1024;
+        const g = fallback.getContext("2d");
+        g.fillStyle = "#222";
+        g.fillRect(0,0,1024,1024);
+        g.fillStyle = "#fff";
+        g.font = "bold 44px system-ui, sans-serif";
+        g.fillText("Missing image", 60, 120);
+        g.font = "20px system-ui, sans-serif";
+        g.fillText(url, 60, 160);
+        sourceImage = fallback;
+        isLoading = false;
+        resolve(false);
+      };
+      img.src = url;
+    });
+  }
+
+  async function startLevel(lv){
+    level = lv;
+    N = getNForLevel(level);
+
+    // pick image by level
+    const pick = IMAGE_POOL[(level - 1) % IMAGE_POOL.length];
+    await loadImageToSource(pick);
+
+    resetBoard();
+    shuffleBoard();
+
+    tilePop.clear();
+    dragging = null;
+
+    // reset clear fx state
+    fireworks = [];
+    didClearFx = false;
+
+    // start hint
+    hintTimer = START_HINT_SEC;
+
+    overlayEl.style.display = "none";
+  }
+
+  nextBtn.addEventListener("click", async () => {
+    await startLevel(level + 1);
+  });
+
+  // Boot
+  startLevel(level);
+})();
+</script>
+</body>
+</html>
