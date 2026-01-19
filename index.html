@@ -4,15 +4,67 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Cluster Image Puzzle</title>
-  <style>
-    html, body { margin:0; height:100%; background:#0f0f10; color:#eee; font-family:system-ui, sans-serif; }
-    .app { height:100%; display:flex; align-items:center; justify-content:center; padding:16px; box-sizing:border-box; }
-    .stage { position:relative; width:min(720px, 96vw); }
-    canvas { width:100%; height:auto; display:block; background:#000; border:1px solid #2a2a2a; border-radius:12px; }
 
+  <!-- ✅ AdSense: 승인 후 아래 script 주석을 해제하세요.
+       client 값은 ca-pub- 로 시작합니다.
+  -->
+  <!--
+  <script async
+    src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-XXXXXXXXXXXXXXX"
+    crossorigin="anonymous"></script>
+  -->
+
+  <style>
+    :root{
+      --banner-h: 100px; /* ✅ 320x100 배너 기준 */
+    }
+
+    html, body {
+      margin:0;
+      height:100%;
+      background:#0f0f10;
+      color:#eee;
+      font-family:system-ui, sans-serif;
+
+      /* ✅ 배너 높이만큼 여백(하단 고정 배너가 게임을 가리지 않게) */
+      padding-bottom: calc(var(--banner-h) + env(safe-area-inset-bottom, 0px));
+      box-sizing: border-box;
+
+      overscroll-behavior: none;
+      touch-action: none;
+    }
+
+    .app {
+      min-height: 100%;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:16px;
+      box-sizing:border-box;
+    }
+
+    .stage {
+      position:relative;
+      width:min(720px, 96vw);
+    }
+
+    canvas {
+      width:100%;
+      height:auto;
+      display:block;
+      background:#000;
+      border:1px solid #2a2a2a;
+      border-radius:12px;
+      touch-action: none;
+    }
+
+    /* Clear Overlay */
     .overlay {
-      position:absolute; inset:0;
-      display:flex; align-items:center; justify-content:center;
+      position:absolute;
+      inset:0;
+      display:flex;
+      align-items:center;
+      justify-content:center;
       pointer-events:none;
     }
     .panel {
@@ -20,24 +72,17 @@
       background:rgba(10,10,12,0.72);
       border:1px solid rgba(255,255,255,0.12);
       border-radius:16px;
-      padding:18px 18px;
+      padding:18px;
       min-width:min(360px, 86%);
       text-align:center;
       backdrop-filter: blur(6px);
     }
-    .title {
-      font-size:28px; font-weight:800; letter-spacing:0.5px;
-      margin:0 0 6px 0;
-    }
-    .lv {
-      font-size:14px; opacity:0.92; margin:0 0 10px 0;
-    }
-    .sub {
-      font-size:14px; opacity:0.9; margin:0 0 14px 0; line-height:1.4;
-    }
+    .title { font-size:28px; font-weight:800; margin:0 0 6px 0; }
+    .lv { font-size:14px; opacity:0.92; margin:0 0 10px 0; }
+    .sub { font-size:14px; opacity:0.9; margin:0 0 14px 0; line-height:1.4; }
     .btn {
       appearance:none; border:0;
-      background:#ffffff; color:#111;
+      background:#fff; color:#111;
       padding:12px 16px;
       border-radius:12px;
       font-weight:800;
@@ -46,35 +91,146 @@
     }
     .btn:hover { filter:brightness(0.95); }
     .btn:active { transform: translateY(1px); }
+
+    /* ✅ Audio toggles */
+    .hud {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      display:flex;
+      gap:8px;
+      z-index: 50;
+      pointer-events: auto;
+    }
+    .pill {
+      user-select:none;
+      -webkit-tap-highlight-color: transparent;
+      display:flex;
+      align-items:center;
+      gap:8px;
+      padding:8px 10px;
+      border-radius:999px;
+      background: rgba(0,0,0,0.45);
+      border: 1px solid rgba(255,255,255,0.14);
+      font-size: 12px;
+      cursor:pointer;
+      backdrop-filter: blur(6px);
+    }
+    .dot {
+      width:10px; height:10px; border-radius:99px;
+      background: rgba(255,255,255,0.28);
+      border: 1px solid rgba(255,255,255,0.20);
+    }
+    .pill.on .dot { background: rgba(110,255,170,0.75); }
+    .pill.off { opacity: 0.72; }
+
+    /* ✅ 하단 고정 AdSense 배너 */
+    #bottom-banner {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: calc(var(--banner-h) + env(safe-area-inset-bottom, 0px));
+      padding-bottom: env(safe-area-inset-bottom, 0px);
+      background: rgba(0,0,0,0.92);
+      border-top: 1px solid rgba(255,255,255,0.12);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+    }
+
+    #bottom-banner .inner {
+      width: min(720px, 100%);
+      height: var(--banner-h);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding: 0 8px;
+      box-sizing:border-box;
+      position: relative;
+    }
+
+    /* AdSense 컨테이너 */
+    #bottom-banner ins.adsbygoogle {
+      display:block;
+      width: 100%;
+      height: 100%;
+      min-height: var(--banner-h);
+    }
+
+    /* ✅ fallback placeholder */
+    #ad-fallback {
+      position:absolute;
+      inset: 0;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      font-size:12px;
+      opacity:0.55;
+      pointer-events:none;
+    }
   </style>
 </head>
-<body>
-<div class="app">
-  <div class="stage">
-    <canvas id="c" width="720" height="720"></canvas>
 
-    <div class="overlay" id="overlay" style="display:none;">
-      <div class="panel">
-        <div class="title">CLEAR!</div>
-        <div class="lv" id="lvText">Level 1</div>
-        <p class="sub">다음 레벨로 진행할 수 있어요</p>
-        <button class="btn" id="nextBtn">다음 레벨</button>
+<body>
+  <div class="app">
+    <div class="stage">
+      <canvas id="c" width="720" height="720"></canvas>
+
+      <!-- HUD: audio toggles -->
+      <div class="hud">
+        <div class="pill on" id="bgmToggle" role="button" aria-label="BGM toggle">
+          <span class="dot"></span><span>BGM</span>
+        </div>
+        <div class="pill on" id="sfxToggle" role="button" aria-label="SFX toggle">
+          <span class="dot"></span><span>SFX</span>
+        </div>
+      </div>
+
+      <div class="overlay" id="overlay" style="display:none;">
+        <div class="panel">
+          <div class="title">CLEAR!</div>
+          <div class="lv" id="lvText">Level 1</div>
+          <p class="sub">다음 레벨로 진행할 수 있어요</p>
+          <button class="btn" id="nextBtn">다음 레벨</button>
+        </div>
       </div>
     </div>
   </div>
-</div>
+
+  <!-- ✅ 하단 AdSense 배너 (320x100 기준) -->
+  <div id="bottom-banner">
+    <div class="inner">
+      <!-- 승인 후 아래 ins/script 주석 해제 + client/slot 입력 -->
+      <!--
+      <ins class="adsbygoogle"
+           data-ad-client="ca-pub-XXXXXXXXXXXXXXX"
+           data-ad-slot="1234567890"
+           data-ad-format="rectangle"
+           data-full-width-responsive="true"></ins>
+      -->
+
+      <!-- ✅ 폴백: 광고가 없거나 로딩 실패 시 보여줌 -->
+      <div id="ad-fallback">Ad banner area (320×100)</div>
+    </div>
+  </div>
 
 <script>
 (() => {
   const canvas = document.getElementById("c");
   const ctx = canvas.getContext("2d");
-
   const overlayEl = document.getElementById("overlay");
   const nextBtn = document.getElementById("nextBtn");
   const lvText = document.getElementById("lvText");
 
+  const bgmToggleEl = document.getElementById("bgmToggle");
+  const sfxToggleEl = document.getElementById("sfxToggle");
+
+  const adFallbackEl = document.getElementById("ad-fallback");
+
   // ----------------------------
-  // Image pool (./images/ 폴더에 넣어두기)
+  // Image pool (./images/ 폴더)
   // ----------------------------
   const IMAGE_POOL = [
     "images/01.jpg",
@@ -89,12 +245,6 @@
 
   // ----------------------------
   // Level difficulty curve
-  // 1: 2x2
-  // 2: 3x3
-  // 3: 3x3
-  // 4~9: 4x4
-  // 10~19: 5x5
-  // 20+: 6x6
   // ----------------------------
   let level = 1;
   function getNForLevel(lv){
@@ -105,78 +255,55 @@
     return 6;
   }
 
-  // ----------------------------
-  // Rendering config (각진 타일)
-  // ----------------------------
   let N = getNForLevel(level);
   const PADDING = 12;
   const TILE_GAP = 2;
   const DRAG_ALPHA = 0.98;
 
-  // ----------------------------
-  // Start hint (원본 희미하게 0.8초)
-  // ----------------------------
+  // Start hint (0.8s)
   const START_HINT_SEC = 0.8;
-  let hintTimer = 0; // seconds remaining
+  let hintTimer = 0;
 
-  // ----------------------------
-  // Image source (cropped square)
-  // ----------------------------
-  let sourceImage = null;       // offscreen canvas
+  // Image source
+  let sourceImage = null;
   let isLoading = false;
 
-  // ----------------------------
-  // Board model: board[pos] = tileId
-  // ----------------------------
+  // Board
   let board = [];
   let solved = [];
 
-  // Drag cluster state
+  // Drag cluster state (Pointer Events)
   let dragging = null;
+  let activePointerId = null;
 
-  // ----------------------------
-  // Pop animation per tileId
-  // ----------------------------
+  // Pop animation
   const tilePop = new Map();
   const POP_DUR = 0.12;
   const POP_MAG = 0.06;
 
-  // ----------------------------
   // Fireworks particles on clear
-  // ----------------------------
-  let fireworks = []; // {x,y,vx,vy,life,maxLife,size}
+  let fireworks = [];
   let didClearFx = false;
 
-  function spawnFireworks(){
-    const W = canvas.width, H = canvas.height;
-    const cx = W/2, cy = H/2;
-
-    const bursts = 8;
-    for (let b=0; b<bursts; b++){
-      const bx = cx + (Math.random()*160 - 80);
-      const by = cy + (Math.random()*120 - 60);
-
-      const count = 24 + Math.floor(Math.random()*14);
-      for (let i=0;i<count;i++){
-        const ang = Math.random()*Math.PI*2;
-        const sp = 120 + Math.random()*180;
-        fireworks.push({
-          x: bx,
-          y: by,
-          vx: Math.cos(ang)*sp,
-          vy: Math.sin(ang)*sp,
-          life: 0,
-          maxLife: 0.75 + Math.random()*0.45,
-          size: 1.2 + Math.random()*1.8
-        });
-      }
-    }
-  }
-
   // ----------------------------
-  // SFX (WebAudio)
+  // Audio settings (✅ 2배 볼륨)
   // ----------------------------
   let audioCtx = null;
+  let master = { bgmOn:true, sfxOn:true };
+
+  // 기존 대비 2배 정도 키움
+  const SFX_GAIN = 0.36;  // (기존 0.18 정도였던 느낌) *2
+  const CLEAR_GAIN = 0.44;
+  const BGM_GAIN = 0.11;  // (기존 0.055) *2
+
+  let bgm = {
+    playing: false,
+    gain: null,
+    nextNoteTime: 0,
+    step: 0,
+    timer: null
+  };
+
   function ensureAudio(){
     if (!audioCtx){
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -184,8 +311,29 @@
     if (audioCtx.state === "suspended") audioCtx.resume();
   }
 
+  function setToggleUI(el, on){
+    el.classList.toggle("on", on);
+    el.classList.toggle("off", !on);
+  }
+
+  setToggleUI(bgmToggleEl, master.bgmOn);
+  setToggleUI(sfxToggleEl, master.sfxOn);
+
+  bgmToggleEl.addEventListener("click", () => {
+    master.bgmOn = !master.bgmOn;
+    setToggleUI(bgmToggleEl, master.bgmOn);
+    // gain만 조절해서 즉시 반영
+    if (bgm.gain) bgm.gain.gain.value = master.bgmOn ? BGM_GAIN : 0.0001;
+  });
+
+  sfxToggleEl.addEventListener("click", () => {
+    master.sfxOn = !master.sfxOn;
+    setToggleUI(sfxToggleEl, master.sfxOn);
+  });
+
   // 착붙: 크리링~
   function playChime(){
+    if (!master.sfxOn) return;
     try{
       ensureAudio();
       const t0 = audioCtx.currentTime;
@@ -200,7 +348,7 @@
         osc.frequency.setValueAtTime(n.f, t0 + n.t);
 
         gain.gain.setValueAtTime(0.0001, t0 + n.t);
-        gain.gain.exponentialRampToValueAtTime(0.18, t0 + n.t + 0.015);
+        gain.gain.exponentialRampToValueAtTime(SFX_GAIN, t0 + n.t + 0.015);
         gain.gain.exponentialRampToValueAtTime(0.0001, t0 + n.t + n.d);
 
         osc.connect(gain);
@@ -213,17 +361,16 @@
 
   // 클리어: 뾰로롱~
   function playClear(){
+    if (!master.sfxOn) return;
     try{
       ensureAudio();
       const t0 = audioCtx.currentTime;
-
       const seq = [
-        { f: 1046.5, t: 0.00, d: 0.12 }, // C6
-        { f: 1318.5, t: 0.10, d: 0.12 }, // E6
-        { f: 1568.0, t: 0.20, d: 0.14 }, // G6
-        { f: 2093.0, t: 0.34, d: 0.18 }, // C7
+        { f: 1046.5, t: 0.00, d: 0.12 },
+        { f: 1318.5, t: 0.10, d: 0.12 },
+        { f: 1568.0, t: 0.20, d: 0.14 },
+        { f: 2093.0, t: 0.34, d: 0.18 },
       ];
-
       for (const n of seq){
         const osc = audioCtx.createOscillator();
         const gain = audioCtx.createGain();
@@ -231,10 +378,9 @@
         osc.frequency.setValueAtTime(n.f, t0 + n.t);
 
         gain.gain.setValueAtTime(0.0001, t0 + n.t);
-        gain.gain.exponentialRampToValueAtTime(0.22, t0 + n.t + 0.02);
+        gain.gain.exponentialRampToValueAtTime(CLEAR_GAIN, t0 + n.t + 0.02);
         gain.gain.exponentialRampToValueAtTime(0.0001, t0 + n.t + n.d);
 
-        // 가벼운 반짝임 느낌
         osc.detune.setValueAtTime(-6, t0 + n.t);
         osc.detune.linearRampToValueAtTime(6, t0 + n.t + n.d);
 
@@ -246,8 +392,98 @@
     } catch {}
   }
 
+  // ✅ BGM: 밝고 발랄한 루프 (간단 시퀀서)
+  function startBgmIfNeeded(){
+    try{
+      ensureAudio();
+      if (bgm.playing) return;
+
+      bgm.gain = audioCtx.createGain();
+      bgm.gain.gain.value = master.bgmOn ? BGM_GAIN : 0.0001;
+      bgm.gain.connect(audioCtx.destination);
+
+      bgm.playing = true;
+      bgm.step = 0;
+      bgm.nextNoteTime = audioCtx.currentTime + 0.05;
+
+      const tempo = 132;
+      const spb = 60 / tempo;
+      const stepDur = spb / 2;
+
+      const scale = [
+        261.63, 329.63, 392.00, 523.25,
+        392.00, 329.63, 293.66, 349.23,
+      ];
+
+      function scheduleNote(time, freq, dur){
+        const osc = audioCtx.createOscillator();
+        const g = audioCtx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(freq, time);
+
+        g.gain.setValueAtTime(0.0001, time);
+        g.gain.exponentialRampToValueAtTime(0.12, time + 0.01);
+        g.gain.exponentialRampToValueAtTime(0.0001, time + dur);
+
+        osc.connect(g);
+        g.connect(bgm.gain);
+
+        osc.start(time);
+        osc.stop(time + dur + 0.01);
+      }
+
+      function scheduler(){
+        if (!bgm.playing) return;
+        const lookAhead = 0.10;
+        while (bgm.nextNoteTime < audioCtx.currentTime + lookAhead){
+          const i = bgm.step % scale.length;
+          let f = scale[i];
+          if (bgm.step % 16 === 12) f *= 2;
+
+          const dur = (bgm.step % 8 === 6) ? stepDur * 0.65 : stepDur * 0.85;
+          scheduleNote(bgm.nextNoteTime, f, dur);
+
+          bgm.nextNoteTime += stepDur;
+          bgm.step++;
+        }
+      }
+
+      bgm.timer = setInterval(scheduler, 25);
+    } catch {}
+  }
+
   // ----------------------------
-  // Helpers
+  // AdSense fallback handler
+  // ----------------------------
+  function setupAdFallback(){
+    // 기본은 fallback 표시.
+    // 광고가 실제로 채워지면 숨김.
+    let hasRealAd = false;
+
+    function check(){
+      const ins = document.querySelector("ins.adsbygoogle");
+      if (!ins) {
+        // AdSense 자체가 미설치/주석 상태 -> 계속 fallback
+        adFallbackEl.style.display = "flex";
+        return;
+      }
+
+      // AdSense가 채워지면 ins 내부에 iframe/children이 생기거나, 높이가 변하는 경우가 많음
+      const filled = ins.querySelector("iframe, *") || ins.offsetHeight >= 60;
+      if (filled) hasRealAd = true;
+
+      adFallbackEl.style.display = hasRealAd ? "none" : "flex";
+    }
+
+    // 조금 여유 있게 여러 번 체크
+    setTimeout(check, 800);
+    setTimeout(check, 1800);
+    setTimeout(check, 3200);
+  }
+  setupAdFallback();
+
+  // ----------------------------
+  // Board helpers
   // ----------------------------
   function idx(r,c){ return r*N + c; }
   function rc(pos){ return { r: Math.floor(pos / N), c: pos % N }; }
@@ -272,6 +508,7 @@
     return true;
   }
 
+  // Geometry
   function boardRect(){
     const W = canvas.width, H = canvas.height;
     const size = Math.min(W,H) - PADDING*2;
@@ -299,9 +536,7 @@
     ctx.drawImage(img, sx, sy, tileW, tileH, dx, dy, dw, dh);
   }
 
-  // ----------------------------
-  // Cluster lock detection
-  // ----------------------------
+  // Cluster lock
   function isLockedAdj(posA, posB, dir){
     const idA = board[posA];
     const idB = board[posB];
@@ -350,7 +585,7 @@
     return true;
   }
 
-  // overlap-safe move (no duplication)
+  // overlap-safe move
   function applyClusterMoveOverlapSafe(members, toAnchorPos){
     const old = board.slice();
     const srcPositions = members.map(m => m.pos);
@@ -362,12 +597,10 @@
 
     const next = board.slice();
 
-    // 1) move cluster
     for (let i=0;i<members.length;i++){
       next[dstPositions[i]] = old[srcPositions[i]];
     }
 
-    // 2) move external tiles from dst\src into vacated src\dst
     const vacated = [];
     const displaced = [];
     for (let i=0;i<members.length;i++){
@@ -384,11 +617,11 @@
     board = next;
   }
 
-  // ----------------------------
-  // 착붙 조건 변경: "클러스터가 커졌을 때만" 효과/사운드
-  // - 이동 전/후 '락 그래프' 컴포넌트 크기를 비교해서 증가한 경우만 트리거
-  // ----------------------------
-  function buildLockAdjList(){
+  // "착붙" 조건: 클러스터가 커졌을 때만
+  function buildLockAdjList(useBoard){
+    const saved = board;
+    if (useBoard) board = useBoard;
+
     const adj = Array.from({length:N*N}, () => []);
     const dirs = [
       {dr:-1,dc:0},{dr:1,dc:0},{dr:0,dc:-1},{dr:0,dc:1}
@@ -400,13 +633,12 @@
           const nr = r + d.dr, nc = c + d.dc;
           if (nr<0||nr>=N||nc<0||nc>=N) continue;
           const q = idx(nr,nc);
-          // 양방향으로 넣되, 중복은 괜찮음(컴포넌트 탐색에서 visited로 처리)
-          if (isLockedAdj(p, q, d)){
-            adj[p].push(q);
-          }
+          if (isLockedAdj(p, q, d)) adj[p].push(q);
         }
       }
     }
+
+    if (useBoard) board = saved;
     return adj;
   }
 
@@ -418,7 +650,6 @@
 
     for (let i=0;i<N*N;i++){
       if (visited[i]) continue;
-      // BFS
       const q = [i];
       visited[i] = true;
       compId[i] = cid;
@@ -435,57 +666,61 @@
           }
         }
       }
-
       compSizes[cid] = size;
       cid++;
     }
-
     return { compId, compSizes };
   }
 
   function triggerPop(tileIds){
     if (tileIds.size === 0) return;
-    for (const id of tileIds){
-      tilePop.set(id, POP_DUR);
-    }
+    for (const id of tileIds) tilePop.set(id, POP_DUR);
     playChime();
   }
 
-  // ----------------------------
-  // Pop / Fireworks rendering helpers
-  // ----------------------------
-  function popScaleForTile(tileId){
-    const t = tilePop.get(tileId);
-    if (!t) return 1;
-    const a = Math.max(0, Math.min(1, 1 - (t / POP_DUR)));
-    const s = Math.sin(a * Math.PI);
-    return 1 + POP_MAG * s;
+  // Clear fireworks
+  function spawnFireworks(){
+    const W = canvas.width, H = canvas.height;
+    const cx = W/2, cy = H/2;
+
+    const bursts = 8;
+    for (let b=0; b<bursts; b++){
+      const bx = cx + (Math.random()*160 - 80);
+      const by = cy + (Math.random()*120 - 60);
+      const count = 22 + Math.floor(Math.random()*18);
+
+      for (let i=0;i<count;i++){
+        const ang = Math.random()*Math.PI*2;
+        const sp = 120 + Math.random()*180;
+        fireworks.push({
+          x: bx, y: by,
+          vx: Math.cos(ang)*sp,
+          vy: Math.sin(ang)*sp,
+          life: 0,
+          maxLife: 0.75 + Math.random()*0.45,
+          size: 1.2 + Math.random()*1.8
+        });
+      }
+    }
   }
 
   function renderFireworks(dt){
     if (fireworks.length === 0) return;
-
-    const g = 520; // gravity px/s^2
+    const g = 520;
     for (const p of fireworks){
       p.life += dt;
       p.vy += g * dt;
       p.x += p.vx * dt;
       p.y += p.vy * dt;
-
-      // damping
       p.vx *= (1 - 1.2*dt);
       p.vy *= (1 - 0.2*dt);
     }
-
     fireworks = fireworks.filter(p => p.life < p.maxLife);
 
-    // draw
     ctx.save();
     for (const p of fireworks){
-      const t = p.life / p.maxLife; // 0..1
+      const t = p.life / p.maxLife;
       const a = Math.max(0, 1 - t);
-
-      // 간단히 화이트/약간의 색감 섞어서 "폭죽" 느낌
       const twinkle = 0.6 + 0.4*Math.sin((p.life*18) + (p.x+p.y)*0.01);
       ctx.globalAlpha = a * twinkle;
       ctx.fillStyle = (Math.random() < 0.08) ? "rgba(255,220,140,1)" : "rgba(255,255,255,1)";
@@ -494,12 +729,16 @@
     ctx.restore();
   }
 
-  // ----------------------------
-  // Render
-  // ----------------------------
+  // Rendering
+  function popScaleForTile(tileId){
+    const t = tilePop.get(tileId);
+    if (!t) return 1;
+    const a = Math.max(0, Math.min(1, 1 - (t / POP_DUR)));
+    return 1 + POP_MAG * Math.sin(a * Math.PI);
+  }
+
   function render(dt){
     ctx.clearRect(0,0,canvas.width,canvas.height);
-
     ctx.fillStyle = "#0b0b0c";
     ctx.fillRect(0,0,canvas.width,canvas.height);
 
@@ -516,7 +755,7 @@
 
     const cell = br.size / N;
 
-    // 레벨 시작 힌트 (0.8초): 원본을 아주 희미하게 깔아줌
+    // start hint
     if (hintTimer > 0){
       const alpha = Math.min(0.22, (hintTimer / START_HINT_SEC) * 0.22);
       ctx.save();
@@ -527,7 +766,6 @@
 
     const draggingPosSet = new Set(dragging ? dragging.members.map(m => m.pos) : []);
 
-    // tiles
     for (let pos=0; pos<N*N; pos++){
       if (draggingPosSet.has(pos)) continue;
 
@@ -559,12 +797,11 @@
       const baseX = dragging.mouseX - dragging.grabDX;
       const baseY = dragging.mouseY - dragging.grabDY;
 
-      // hover guide
       if (dragging.hoverAnchorPos != null && dragging.fits){
         const aRC = rc(dragging.hoverAnchorPos);
         ctx.save();
         ctx.globalAlpha = 0.14;
-        ctx.fillStyle = "#ffffff";
+        ctx.fillStyle = "#fff";
         for (const m of dragging.members){
           const rr = aRC.r + m.offR;
           const cc = aRC.c + m.offC;
@@ -575,7 +812,6 @@
         ctx.restore();
       }
 
-      // shadow
       ctx.save();
       ctx.globalAlpha = 0.28;
       ctx.fillStyle = "#000";
@@ -586,7 +822,6 @@
       }
       ctx.restore();
 
-      // tiles
       ctx.save();
       ctx.globalAlpha = DRAG_ALPHA;
       for (const m of dragging.members){
@@ -600,26 +835,21 @@
       ctx.restore();
     }
 
-    // fireworks on top
     renderFireworks(dt);
   }
 
-  // ----------------------------
-  // Game loop
-  // ----------------------------
+  // Main loop
   let last = performance.now();
   function loop(now){
     const dt = Math.min(0.033, (now - last)/1000);
     last = now;
 
-    // decay pop timers
     for (const [id, t] of tilePop.entries()){
       const nt = t - dt;
       if (nt <= 0) tilePop.delete(id);
       else tilePop.set(id, nt);
     }
 
-    // hint timer
     if (hintTimer > 0) hintTimer = Math.max(0, hintTimer - dt);
 
     render(dt);
@@ -627,23 +857,25 @@
   }
   requestAnimationFrame(loop);
 
-  // ----------------------------
-  // Input (mouse + touch)
-  // ----------------------------
-  function getCanvasPoint(evt){
+  // Pointer Events input
+  function getCanvasPointFromPointer(evt){
     const rect = canvas.getBoundingClientRect();
-    const isTouch = evt.touches && evt.touches.length;
-    const clientX = isTouch ? evt.touches[0].clientX : evt.clientX;
-    const clientY = isTouch ? evt.touches[0].clientY : evt.clientY;
-    const x = (clientX - rect.left) * (canvas.width / rect.width);
-    const y = (clientY - rect.top) * (canvas.height / rect.height);
+    const x = (evt.clientX - rect.left) * (canvas.width / rect.width);
+    const y = (evt.clientY - rect.top) * (canvas.height / rect.height);
     return { x, y };
   }
 
-  function onDown(evt){
+  function onPointerDown(evt){
     if (!sourceImage || isLoading) return;
-    ensureAudio(); // 모바일 오디오 unlock
-    const p = getCanvasPoint(evt);
+    if (activePointerId != null) return;
+
+    // ✅ 첫 입력에서 BGM 시작(브라우저 정책 대응)
+    startBgmIfNeeded();
+
+    activePointerId = evt.pointerId;
+    canvas.setPointerCapture(activePointerId);
+
+    const p = getCanvasPointFromPointer(evt);
     const pos = posFromPoint(p.x, p.y);
     if (pos == null) return;
 
@@ -669,9 +901,11 @@
     evt.preventDefault();
   }
 
-  function onMove(evt){
+  function onPointerMove(evt){
+    if (evt.pointerId !== activePointerId) return;
     if (!dragging) return;
-    const p = getCanvasPoint(evt);
+
+    const p = getCanvasPointFromPointer(evt);
     dragging.mouseX = p.x;
     dragging.mouseY = p.y;
 
@@ -682,78 +916,23 @@
     evt.preventDefault();
   }
 
-  function onUp(evt){
+  function onPointerUp(evt){
+    if (evt.pointerId !== activePointerId) return;
+    activePointerId = null;
+
     if (!dragging) return;
-    const p = getCanvasPoint(evt);
-    const dropAnchorPos = posFromPoint(p.x, p.y);
 
-    // --- cluster growth detection BEFORE move
-    const beforeAdj = buildLockAdjList();
-    const before = computeComponents(beforeAdj);
-
-    // remember which tiles were dragged (by tileId)
-    const draggedTileIds = new Set(dragging.members.map(m => m.tileId));
-
-    if (dropAnchorPos != null &&
-        dropAnchorPos !== dragging.anchorPos &&
-        clusterFitsAt(dragging.members, dropAnchorPos)) {
-
-      applyClusterMoveOverlapSafe(dragging.members, dropAnchorPos);
-    }
-
-    dragging = null;
-
-    // --- cluster growth detection AFTER move
-    const afterAdj = buildLockAdjList();
-    const after = computeComponents(afterAdj);
-
-    // Determine if any dragged tile ended up in a bigger component than before.
-    // If yes -> "착붙" 트리거 + pop for tiles in that grown component(s)
-    let grew = false;
-    const popIds = new Set();
-
-    // Map tileId -> current position
-    const tileIdToPos = new Map();
-    for (let pos=0; pos<N*N; pos++) tileIdToPos.set(board[pos], pos);
-
-    for (const tileId of draggedTileIds){
-      const posNow = tileIdToPos.get(tileId);
-      if (posNow == null) continue;
-
-      const cidAfter = after.compId[posNow];
-      const sizeAfter = after.compSizes[cidAfter] || 1;
-
-      // to compare, we need this tileId's previous position before move:
-      // easiest: rebuild from "before" board snapshot? but we didn't store it.
-      // 대신 "성장 조건"을 '움직인 이후 컴포넌트가 2 이상' AND '움직인 타일들 중 최소 하나가 새로 연결된 컴포넌트에 속함'으로 판정.
-      // 보다 확실히 하려면 "이동 전 보드 스냅샷"을 저장해야 함.
-    }
-
-    // ✅ 확실한 성장 판정: 이동 전 보드를 스냅샷으로 저장해서 비교
-    // (위에서 이미 before를 만들었으니, 여기서 추가로 "이동 전 board"를 보관하는 방식으로 구현)
-    // 간단히: onUp 시작에 oldBoard를 저장해두고, 이동 후 타일Id의 이전 pos를 찾자.
-  }
-
-  // 위 onUp을 "스냅샷 비교"로 다시 정의(안전)
-  function onUpFixed(evt){
-    if (!dragging) return;
-    const p = getCanvasPoint(evt);
+    const p = getCanvasPointFromPointer(evt);
     const dropAnchorPos = posFromPoint(p.x, p.y);
 
     const oldBoard = board.slice();
     const draggedTileIds = new Set(dragging.members.map(m => m.tileId));
 
-    // before components on oldBoard
-    const beforeInfo = (() => {
-      const saved = board;
-      board = oldBoard; // temporarily point board to oldBoard for lock checks
-      const adj = buildLockAdjList();
-      const info = computeComponents(adj);
-      board = saved;
-      return info;
-    })();
+    // before comps
+    const beforeAdj = buildLockAdjList(oldBoard);
+    const beforeInfo = computeComponents(beforeAdj);
 
-    // do move
+    // move
     if (dropAnchorPos != null &&
         dropAnchorPos !== dragging.anchorPos &&
         clusterFitsAt(dragging.members, dropAnchorPos)) {
@@ -762,18 +941,19 @@
 
     dragging = null;
 
-    // after components on current board
-    const afterAdj = buildLockAdjList();
+    // after comps
+    const afterAdj = buildLockAdjList(null);
     const afterInfo = computeComponents(afterAdj);
 
-    // build tileId -> pos maps (before/after)
+    // tileId -> pos maps
     const beforePos = new Map();
     for (let pos=0; pos<N*N; pos++) beforePos.set(oldBoard[pos], pos);
     const afterPos = new Map();
     for (let pos=0; pos<N*N; pos++) afterPos.set(board[pos], pos);
 
+    // growth detect
     let grew = false;
-    const compsToPop = new Set(); // component ids after that grew
+    const compsToPop = new Set();
     for (const tileId of draggedTileIds){
       const pBefore = beforePos.get(tileId);
       const pAfter = afterPos.get(tileId);
@@ -792,16 +972,12 @@
     }
 
     if (grew){
-      // pop tiles in those grown comps
       const popTileIds = new Set();
       for (let pos=0; pos<N*N; pos++){
         const cid = afterInfo.compId[pos];
-        if (compsToPop.has(cid)){
-          popTileIds.add(board[pos]);
-        }
+        if (compsToPop.has(cid)) popTileIds.add(board[pos]);
       }
-      for (const id of popTileIds) tilePop.set(id, POP_DUR);
-      playChime();
+      triggerPop(popTileIds);
     }
 
     // solved?
@@ -810,24 +986,18 @@
       lvText.textContent = `Level ${level}`;
       overlayEl.style.display = "flex";
       spawnFireworks();
-      playClear(); // ✅ 클리어 사운드
+      playClear();
     }
 
     evt.preventDefault();
   }
 
-  // hook events (use fixed onUp)
-  canvas.addEventListener("mousedown", onDown);
-  window.addEventListener("mousemove", onMove);
-  window.addEventListener("mouseup", onUpFixed);
+  canvas.addEventListener("pointerdown", onPointerDown);
+  window.addEventListener("pointermove", onPointerMove, { passive:false });
+  window.addEventListener("pointerup", onPointerUp, { passive:false });
+  window.addEventListener("pointercancel", onPointerUp, { passive:false });
 
-  canvas.addEventListener("touchstart", onDown, { passive:false });
-  window.addEventListener("touchmove", onMove, { passive:false });
-  window.addEventListener("touchend", onUpFixed, { passive:false });
-
-  // ----------------------------
-  // Level flow + image loading
-  // ----------------------------
+  // Level + image loading
   function centerCropToSquare(img, size=1024){
     const off = document.createElement("canvas");
     off.width = off.height = size;
@@ -852,7 +1022,6 @@
         resolve(true);
       };
       img.onerror = () => {
-        // fallback
         const fallback = document.createElement("canvas");
         fallback.width = fallback.height = 1024;
         const g = fallback.getContext("2d");
@@ -875,7 +1044,6 @@
     level = lv;
     N = getNForLevel(level);
 
-    // pick image by level
     const pick = IMAGE_POOL[(level - 1) % IMAGE_POOL.length];
     await loadImageToSource(pick);
 
@@ -885,13 +1053,10 @@
     tilePop.clear();
     dragging = null;
 
-    // reset clear fx state
     fireworks = [];
     didClearFx = false;
 
-    // start hint
     hintTimer = START_HINT_SEC;
-
     overlayEl.style.display = "none";
   }
 
