@@ -26,8 +26,9 @@
       font-family:system-ui, sans-serif;
       box-sizing:border-box;
 
-      padding-bottom: calc(var(--banner-h) + env(safe-area-inset-bottom, 0px));
+      /* 상단바/하단배너 공간 확보 */
       padding-top: calc(var(--topbar-h) + env(safe-area-inset-top, 0px));
+      padding-bottom: calc(var(--banner-h) + env(safe-area-inset-bottom, 0px));
 
       overscroll-behavior: none;
       touch-action: none;
@@ -106,6 +107,7 @@
       cursor:pointer;
       backdrop-filter: blur(6px);
       color:#fff;
+      white-space: nowrap;
     }
     .dot {
       width:10px; height:10px; border-radius:99px;
@@ -115,7 +117,7 @@
     .pill.on .dot { background: rgba(110,255,170,0.75); }
     .pill.off { opacity: 0.72; }
 
-    /* ✅ TOPBAR */
+    /* ✅ TOPBAR: 버전 / 레벨 / 힌트 / 버튼 */
     #topbar{
       position: fixed;
       left: 0; right: 0;
@@ -132,13 +134,32 @@
     }
     #topbar .topbar-inner{
       width: min(720px, 96vw);
-      display:flex;
-      justify-content:flex-end;
-      gap: 8px;
-      padding: 0 12px;
-      box-sizing:border-box;
-      height: var(--topbar-h);
+      display:grid;
+      grid-template-columns: auto 1fr auto;
       align-items:center;
+      padding: 0 12px;
+      height: var(--topbar-h);
+      box-sizing:border-box;
+      gap: 10px;
+    }
+    .topbar-left{
+      font-size: 12px;
+      opacity: 0.85;
+      white-space: nowrap;
+    }
+    .topbar-center{
+      text-align: center;
+      font-weight: 700;
+      font-size: 14px;
+      letter-spacing: 0.2px;
+      white-space: nowrap;
+    }
+    .topbar-right{
+      display:flex;
+      gap: 8px;
+      align-items:center;
+      justify-content:flex-end;
+      white-space: nowrap;
     }
 
     /* ✅ bottom banner */
@@ -185,6 +206,12 @@
       opacity:0.55;
       pointer-events:none;
     }
+
+    /* ✅ PC에서 배너가 캔버스를 가리면 이 옵션이 가장 안전 */
+    @media (min-width: 900px) {
+      #bottom-banner { display:none !important; }
+      html, body { padding-bottom: 0 !important; }
+    }
   </style>
 </head>
 
@@ -192,11 +219,18 @@
   <!-- ✅ TOPBAR DOM -->
   <div id="topbar">
     <div class="topbar-inner">
-      <div class="pill on" id="bgmToggle" role="button" aria-label="BGM toggle">
-        <span class="dot"></span><span>BGM</span>
-      </div>
-      <div class="pill on" id="sfxToggle" role="button" aria-label="SFX toggle">
-        <span class="dot"></span><span>SFX</span>
+      <div class="topbar-left"><span class="version">v0.00.12</span></div>
+      <div class="topbar-center"><span id="levelLabel">Level 1 / 30</span></div>
+      <div class="topbar-right">
+        <div class="pill" id="hintBtn" role="button" aria-label="Hint">
+          <span>HINT</span>
+        </div>
+        <div class="pill on" id="bgmToggle" role="button" aria-label="BGM toggle">
+          <span class="dot"></span><span>BGM</span>
+        </div>
+        <div class="pill on" id="sfxToggle" role="button" aria-label="SFX toggle">
+          <span class="dot"></span><span>SFX</span>
+        </div>
       </div>
     </div>
   </div>
@@ -208,7 +242,7 @@
       <div class="overlay" id="overlay" style="display:none;">
         <div class="panel">
           <div class="title">CLEAR!</div>
-          <div class="lv" id="lvText">Level 1</div>
+          <div class="lv" id="lvText">Level 1 / 30</div>
           <p class="sub">다음 레벨로 진행할 수 있어요</p>
           <button class="btn" id="nextBtn">다음 레벨</button>
         </div>
@@ -236,11 +270,16 @@
 
 <script>
 (() => {
+  const VERSION = "0.00.12";
+  const TOTAL_LEVELS = 30;
+
   const canvas = document.getElementById("c");
   const ctx = canvas.getContext("2d");
   const overlayEl = document.getElementById("overlay");
   const nextBtn = document.getElementById("nextBtn");
   const lvText = document.getElementById("lvText");
+  const levelLabel = document.getElementById("levelLabel");
+  const hintBtn = document.getElementById("hintBtn");
 
   const bgmToggleEl = document.getElementById("bgmToggle");
   const sfxToggleEl = document.getElementById("sfxToggle");
@@ -248,11 +287,12 @@
 
   // ----------------------------
   // Image pool (./images/)
+  // 01.jpg ~ 30.jpg 가정 (없으면 fallback 캔버스 표시)
   // ----------------------------
-  const IMAGE_POOL = [
-    "images/01.jpg","images/02.jpg","images/03.jpg","images/04.jpg",
-    "images/05.jpg","images/06.jpg","images/07.jpg","images/08.jpg",
-  ];
+  const IMAGE_POOL = Array.from({length: TOTAL_LEVELS}, (_,i) => {
+    const n = String(i+1).padStart(2,"0");
+    return `images/${n}.jpg`;
+  });
 
   // ----------------------------
   // Difficulty curve
@@ -271,15 +311,23 @@
   const TILE_GAP = 2;
   const DRAG_ALPHA = 0.98;
 
+  // Start hint (0.8s)
   const START_HINT_SEC = 0.8;
   let hintTimer = 0;
 
+  // ✅ "번호 힌트" (3초)
+  const NUMBER_HINT_SEC = 3.0;
+  let numberHintTimer = 0;
+
+  // Image source
   let sourceImage = null;
   let isLoading = false;
 
+  // Board
   let board = [];
   let solved = [];
 
+  // Drag cluster state
   let dragging = null;
   let activePointerId = null;
 
@@ -288,13 +336,16 @@
   const POP_DUR = 0.12;
   const POP_MAG = 0.06;
 
+  // Fireworks particles on clear
+  let fireworks = [];
+  let didClearFx = false;
+
   // ----------------------------
-  // ✅ Audio (복구)
+  // Audio
   // ----------------------------
   let audioCtx = null;
   let master = { bgmOn:true, sfxOn:true };
 
-  // (이전 네 요청대로 약간 큰 편)
   const SFX_GAIN = 0.36;
   const CLEAR_GAIN = 0.44;
   const BGM_GAIN = 0.11;
@@ -322,17 +373,26 @@
   setToggleUI(sfxToggleEl, master.sfxOn);
 
   bgmToggleEl.addEventListener("click", () => {
+    startBgmIfNeeded();
     master.bgmOn = !master.bgmOn;
     setToggleUI(bgmToggleEl, master.bgmOn);
     if (bgm.gain) bgm.gain.gain.value = master.bgmOn ? BGM_GAIN : 0.0001;
   });
 
   sfxToggleEl.addEventListener("click", () => {
+    startBgmIfNeeded();
     master.sfxOn = !master.sfxOn;
     setToggleUI(sfxToggleEl, master.sfxOn);
   });
 
-  // SFX: 착붙 크리링~
+  // ✅ 힌트 버튼
+  hintBtn.addEventListener("click", () => {
+    // 오디오 unlock 겸(원하면 제거해도 됨)
+    startBgmIfNeeded();
+    numberHintTimer = NUMBER_HINT_SEC; // 누를 때마다 3초로 리셋
+  });
+
+  // 착붙: 크리링~
   function playChime(){
     if (!master.sfxOn) return;
     try{
@@ -360,7 +420,7 @@
     } catch {}
   }
 
-  // SFX: 클리어 뾰로롱~
+  // 클리어: 뾰로롱~
   function playClear(){
     if (!master.sfxOn) return;
     try{
@@ -524,6 +584,24 @@
     ctx.drawImage(img, sx, sy, tileW, tileH, dx, dy, dw, dh);
   }
 
+  // ✅ 번호 힌트: 타일 위에 "정답 위치 번호" = (tileId + 1)
+  function drawHintNumberOnTile(tileId, cx, cy, cell){
+    const num = tileId + 1; // 핵심!
+    ctx.save();
+    ctx.globalAlpha = 0.26;              // 희미하게
+    ctx.fillStyle = "#fff";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = `800 ${Math.max(14, cell*0.28)}px system-ui, sans-serif`;
+
+    // 가독성 살짝만 (너무 진하면 힌트가 과해짐)
+    ctx.shadowColor = "rgba(0,0,0,0.60)";
+    ctx.shadowBlur = 6;
+
+    ctx.fillText(String(num), cx, cy);
+    ctx.restore();
+  }
+
   // Cluster lock
   function isLockedAdj(posA, posB, dir){
     const idA = board[posA];
@@ -568,7 +646,7 @@
     return true;
   }
 
-  // overlap-safe move
+  // overlap-safe move (복사 버그 방지)
   function applyClusterMoveOverlapSafe(members, toAnchorPos){
     const old = board.slice();
     const srcPositions = members.map(m => m.pos);
@@ -607,6 +685,70 @@
     return 1 + POP_MAG * Math.sin(a * Math.PI);
   }
 
+  // Fireworks
+  function spawnFireworks(){
+    const W = canvas.width, H = canvas.height;
+    const cx = W/2, cy = H/2;
+
+    const bursts = 8;
+    for (let b=0; b<bursts; b++){
+      const bx = cx + (Math.random()*160 - 80);
+      const by = cy + (Math.random()*120 - 60);
+      const count = 22 + Math.floor(Math.random()*18);
+
+      for (let i=0;i<count;i++){
+        const ang = Math.random()*Math.PI*2;
+        const sp = 120 + Math.random()*180;
+        fireworks.push({
+          x: bx, y: by,
+          vx: Math.cos(ang)*sp,
+          vy: Math.sin(ang)*sp,
+          life: 0,
+          maxLife: 0.75 + Math.random()*0.45,
+          size: 1.2 + Math.random()*1.8
+        });
+      }
+    }
+  }
+
+  function renderFireworks(dt){
+    if (fireworks.length === 0) return;
+    const g = 520;
+    for (const p of fireworks){
+      p.life += dt;
+      p.vy += g * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vx *= (1 - 1.2*dt);
+      p.vy *= (1 - 0.2*dt);
+    }
+    fireworks = fireworks.filter(p => p.life < p.maxLife);
+
+    ctx.save();
+    for (const p of fireworks){
+      const t = p.life / p.maxLife;
+      const a = Math.max(0, 1 - t);
+      const twinkle = 0.6 + 0.4*Math.sin((p.life*18) + (p.x+p.y)*0.01);
+      ctx.globalAlpha = a * twinkle;
+      ctx.fillStyle = (Math.random() < 0.08) ? "rgba(255,220,140,1)" : "rgba(255,255,255,1)";
+      ctx.fillRect(p.x, p.y, p.size, p.size);
+    }
+    ctx.restore();
+  }
+
+  // "착붙" 조건(간단): 이동 후 클러스터 길이가 2 이상이면 팝 + 사운드
+  function tryPopAt(pos){
+    if (pos == null) return;
+    const cl = getCluster(pos);
+    if (cl.length >= 2){
+      for (const m of cl) tilePop.set(m.tileId, POP_DUR);
+      playChime();
+    }
+  }
+
+  // ----------------------------
+  // Rendering
+  // ----------------------------
   function render(dt){
     ctx.clearRect(0,0,canvas.width,canvas.height);
     ctx.fillStyle = "#0b0b0c";
@@ -625,6 +767,7 @@
 
     const cell = br.size / N;
 
+    // start hint (원본 힌트)
     if (hintTimer > 0){
       const alpha = Math.min(0.22, (hintTimer / START_HINT_SEC) * 0.22);
       ctx.save();
@@ -634,6 +777,8 @@
     }
 
     const draggingPosSet = new Set(dragging ? dragging.members.map(m => m.pos) : []);
+
+    // draw static tiles
     for (let pos=0; pos<N*N; pos++){
       if (draggingPosSet.has(pos)) continue;
 
@@ -655,11 +800,17 @@
       drawTile(tileId, 0, 0, w, h);
       ctx.restore();
 
+      // ✅ 번호 힌트(정답 위치 번호)
+      if (numberHintTimer > 0){
+        drawHintNumberOnTile(tileId, cx, cy, cell);
+      }
+
       ctx.strokeStyle = "rgba(255,255,255,0.06)";
       ctx.lineWidth = 1;
       ctx.strokeRect(x0+0.5, y0+0.5, w0-1, h0-1);
     }
 
+    // dragging cluster
     if (dragging){
       const baseX = dragging.mouseX - dragging.grabDX;
       const baseY = dragging.mouseY - dragging.grabDY;
@@ -680,14 +831,25 @@
         const x = baseX + m.offC*cell;
         const y = baseY + m.offR*cell;
         drawTile(m.tileId, x, y, cell - TILE_GAP, cell - TILE_GAP);
+
+        // ✅ 드래그 중에도 번호 표시
+        if (numberHintTimer > 0){
+          const cx = x + (cell - TILE_GAP)/2;
+          const cy = y + (cell - TILE_GAP)/2;
+          drawHintNumberOnTile(m.tileId, cx, cy, cell);
+        }
+
         ctx.strokeStyle = "rgba(255,255,255,0.18)";
         ctx.lineWidth = 2;
         ctx.strokeRect(x+0.5, y+0.5, (cell - TILE_GAP)-1, (cell - TILE_GAP)-1);
       }
       ctx.restore();
     }
+
+    renderFireworks(dt);
   }
 
+  // Main loop
   let last = performance.now();
   function loop(now){
     const dt = Math.min(0.033, (now - last)/1000);
@@ -700,13 +862,14 @@
     }
 
     if (hintTimer > 0) hintTimer = Math.max(0, hintTimer - dt);
+    if (numberHintTimer > 0) numberHintTimer = Math.max(0, numberHintTimer - dt);
 
     render(dt);
     requestAnimationFrame(loop);
   }
   requestAnimationFrame(loop);
 
-  // Pointer input
+  // Pointer Events input
   function getCanvasPointFromPointer(evt){
     const rect = canvas.getBoundingClientRect();
     const x = (evt.clientX - rect.left) * (canvas.width / rect.width);
@@ -718,7 +881,7 @@
     if (!sourceImage || isLoading) return;
     if (activePointerId != null) return;
 
-    // ✅ 모바일에서 오디오 unlock + BGM 시작
+    // 오디오 unlock + bgm 시작(모바일 정책)
     startBgmIfNeeded();
 
     activePointerId = evt.pointerId;
@@ -762,31 +925,27 @@
   function onPointerUp(evt){
     if (evt.pointerId !== activePointerId) return;
     activePointerId = null;
+
     if (!dragging) return;
 
     const p = getCanvasPointFromPointer(evt);
     const dropAnchorPos = posFromPoint(p.x, p.y);
 
-    // move
     if (dropAnchorPos != null &&
         dropAnchorPos !== dragging.anchorPos &&
         clusterFitsAt(dragging.members, dropAnchorPos)) {
       applyClusterMoveOverlapSafe(dragging.members, dropAnchorPos);
-    }
-
-    // 착붙 팝(간단): 이동 후 클러스터가 2개 이상이면 팝 + chime
-    // (원래 “성장 조건” 로직이 있으면 여기 대신 그 로직을 넣으면 됨)
-    const cl = getCluster(dropAnchorPos ?? dragging.anchorPos);
-    if (cl.length >= 2) {
-      for (const m of cl) tilePop.set(m.tileId, POP_DUR);
-      playChime();
+      tryPopAt(dropAnchorPos);
+    } else {
+      tryPopAt(dragging.anchorPos);
     }
 
     dragging = null;
 
-    if (isSolved()){
-      lvText.textContent = `Level ${level}`;
+    if (isSolved() && !didClearFx){
+      didClearFx = true;
       overlayEl.style.display = "flex";
+      spawnFireworks();
       playClear();
     }
 
@@ -798,7 +957,7 @@
   window.addEventListener("pointerup", onPointerUp, { passive:false });
   window.addEventListener("pointercancel", onPointerUp, { passive:false });
 
-  // Image loading
+  // Level + image loading
   function centerCropToSquare(img, size=1024){
     const off = document.createElement("canvas");
     off.width = off.height = size;
@@ -841,11 +1000,18 @@
     });
   }
 
+  function updateTopbarLabels(){
+    levelLabel.textContent = `Level ${level} / ${TOTAL_LEVELS}`;
+    lvText.textContent = `Level ${level} / ${TOTAL_LEVELS}`;
+  }
+
   async function startLevel(lv){
-    level = lv;
+    level = ((lv - 1) % TOTAL_LEVELS) + 1;
     N = getNForLevel(level);
 
-    const pick = IMAGE_POOL[(level - 1) % IMAGE_POOL.length];
+    updateTopbarLabels();
+
+    const pick = IMAGE_POOL[level - 1];
     await loadImageToSource(pick);
 
     resetBoard();
@@ -853,6 +1019,9 @@
 
     tilePop.clear();
     dragging = null;
+
+    fireworks = [];
+    didClearFx = false;
 
     hintTimer = START_HINT_SEC;
     overlayEl.style.display = "none";
@@ -862,6 +1031,7 @@
     await startLevel(level + 1);
   });
 
+  // boot
   startLevel(level);
 })();
 </script>
