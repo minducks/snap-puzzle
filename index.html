@@ -5,9 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Cluster Image Puzzle</title>
 
-  <!-- ✅ AdSense: 승인 후 아래 script 주석을 해제하세요.
-       client 값은 ca-pub- 로 시작합니다.
-  -->
+  <!-- ✅ AdSense: 승인 후 아래 script 주석을 해제하세요. -->
   <!--
   <script async
     src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-XXXXXXXXXXXXXXX"
@@ -16,8 +14,8 @@
 
   <style>
     :root{
-      --banner-h: 100px; /* 320x100 배너 기준 */
-      --topbar-h: 52px;  /* 상단바 높이 */
+      --banner-h: 100px; /* 320x100 */
+      --topbar-h: 52px;
     }
 
     html, body {
@@ -26,9 +24,8 @@
       background:#0f0f10;
       color:#eee;
       font-family:system-ui, sans-serif;
-      box-sizing: border-box;
+      box-sizing:border-box;
 
-      /* ✅ 하단 배너 + 상단바 여백 */
       padding-bottom: calc(var(--banner-h) + env(safe-area-inset-bottom, 0px));
       padding-top: calc(var(--topbar-h) + env(safe-area-inset-top, 0px));
 
@@ -94,7 +91,7 @@
     .btn:hover { filter:brightness(0.95); }
     .btn:active { transform: translateY(1px); }
 
-    /* ✅ pill button (BGM/SFX) */
+    /* pill */
     .pill {
       user-select:none;
       -webkit-tap-highlight-color: transparent;
@@ -118,7 +115,7 @@
     .pill.on .dot { background: rgba(110,255,170,0.75); }
     .pill.off { opacity: 0.72; }
 
-    /* ✅ TOPBAR (캔버스 밖, 페이지 상단 고정) */
+    /* ✅ TOPBAR */
     #topbar{
       position: fixed;
       left: 0; right: 0;
@@ -144,7 +141,7 @@
       align-items:center;
     }
 
-    /* ✅ 하단 고정 AdSense 배너 */
+    /* ✅ bottom banner */
     #bottom-banner {
       position: fixed;
       left: 0;
@@ -178,7 +175,6 @@
       min-height: var(--banner-h);
     }
 
-    /* ✅ fallback placeholder */
     #ad-fallback {
       position:absolute;
       inset: 0;
@@ -193,7 +189,7 @@
 </head>
 
 <body>
-  <!-- ✅ TOPBAR DOM (캔버스 밖으로 올림) -->
+  <!-- ✅ TOPBAR DOM -->
   <div id="topbar">
     <div class="topbar-inner">
       <div class="pill on" id="bgmToggle" role="button" aria-label="BGM toggle">
@@ -220,7 +216,7 @@
     </div>
   </div>
 
-  <!-- ✅ 하단 AdSense 배너 (320x100 기준) -->
+  <!-- ✅ Bottom Ad banner -->
   <div id="bottom-banner">
     <div class="inner">
       <!-- 승인 후 아래 ins/script 주석 해제 + client/slot 입력 -->
@@ -251,7 +247,7 @@
   const adFallbackEl = document.getElementById("ad-fallback");
 
   // ----------------------------
-  // Image pool (./images/ 폴더)
+  // Image pool (./images/)
   // ----------------------------
   const IMAGE_POOL = [
     "images/01.jpg","images/02.jpg","images/03.jpg","images/04.jpg",
@@ -259,7 +255,7 @@
   ];
 
   // ----------------------------
-  // Level difficulty curve
+  // Difficulty curve
   // ----------------------------
   let level = 1;
   function getNForLevel(lv){
@@ -275,19 +271,15 @@
   const TILE_GAP = 2;
   const DRAG_ALPHA = 0.98;
 
-  // Start hint (0.8s)
   const START_HINT_SEC = 0.8;
   let hintTimer = 0;
 
-  // Image source
   let sourceImage = null;
   let isLoading = false;
 
-  // Board
   let board = [];
   let solved = [];
 
-  // Drag cluster state
   let dragging = null;
   let activePointerId = null;
 
@@ -296,14 +288,31 @@
   const POP_DUR = 0.12;
   const POP_MAG = 0.06;
 
-  // Fireworks particles on clear
-  let fireworks = [];
-  let didClearFx = false;
-
   // ----------------------------
-  // Audio toggles only (BGM 구현은 보류)
+  // ✅ Audio (복구)
   // ----------------------------
+  let audioCtx = null;
   let master = { bgmOn:true, sfxOn:true };
+
+  // (이전 네 요청대로 약간 큰 편)
+  const SFX_GAIN = 0.36;
+  const CLEAR_GAIN = 0.44;
+  const BGM_GAIN = 0.11;
+
+  let bgm = {
+    playing: false,
+    gain: null,
+    nextNoteTime: 0,
+    step: 0,
+    timer: null
+  };
+
+  function ensureAudio(){
+    if (!audioCtx){
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audioCtx.state === "suspended") audioCtx.resume();
+  }
 
   function setToggleUI(el, on){
     el.classList.toggle("on", on);
@@ -315,14 +324,137 @@
   bgmToggleEl.addEventListener("click", () => {
     master.bgmOn = !master.bgmOn;
     setToggleUI(bgmToggleEl, master.bgmOn);
+    if (bgm.gain) bgm.gain.gain.value = master.bgmOn ? BGM_GAIN : 0.0001;
   });
+
   sfxToggleEl.addEventListener("click", () => {
     master.sfxOn = !master.sfxOn;
     setToggleUI(sfxToggleEl, master.sfxOn);
   });
 
+  // SFX: 착붙 크리링~
+  function playChime(){
+    if (!master.sfxOn) return;
+    try{
+      ensureAudio();
+      const t0 = audioCtx.currentTime;
+      const notes = [
+        { f: 1568, t: 0.00, d: 0.10 },
+        { f: 1319, t: 0.07, d: 0.12 },
+      ];
+      for (const n of notes){
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(n.f, t0 + n.t);
+
+        gain.gain.setValueAtTime(0.0001, t0 + n.t);
+        gain.gain.exponentialRampToValueAtTime(SFX_GAIN, t0 + n.t + 0.015);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t0 + n.t + n.d);
+
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start(t0 + n.t);
+        osc.stop(t0 + n.t + n.d + 0.02);
+      }
+    } catch {}
+  }
+
+  // SFX: 클리어 뾰로롱~
+  function playClear(){
+    if (!master.sfxOn) return;
+    try{
+      ensureAudio();
+      const t0 = audioCtx.currentTime;
+      const seq = [
+        { f: 1046.5, t: 0.00, d: 0.12 },
+        { f: 1318.5, t: 0.10, d: 0.12 },
+        { f: 1568.0, t: 0.20, d: 0.14 },
+        { f: 2093.0, t: 0.34, d: 0.18 },
+      ];
+      for (const n of seq){
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = "triangle";
+        osc.frequency.setValueAtTime(n.f, t0 + n.t);
+
+        gain.gain.setValueAtTime(0.0001, t0 + n.t);
+        gain.gain.exponentialRampToValueAtTime(CLEAR_GAIN, t0 + n.t + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t0 + n.t + n.d);
+
+        osc.detune.setValueAtTime(-6, t0 + n.t);
+        osc.detune.linearRampToValueAtTime(6, t0 + n.t + n.d);
+
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start(t0 + n.t);
+        osc.stop(t0 + n.t + n.d + 0.03);
+      }
+    } catch {}
+  }
+
+  // BGM: 밝고 발랄한 루프
+  function startBgmIfNeeded(){
+    try{
+      ensureAudio();
+      if (bgm.playing) return;
+
+      bgm.gain = audioCtx.createGain();
+      bgm.gain.gain.value = master.bgmOn ? BGM_GAIN : 0.0001;
+      bgm.gain.connect(audioCtx.destination);
+
+      bgm.playing = true;
+      bgm.step = 0;
+      bgm.nextNoteTime = audioCtx.currentTime + 0.05;
+
+      const tempo = 132;
+      const spb = 60 / tempo;
+      const stepDur = spb / 2;
+
+      const scale = [
+        261.63, 329.63, 392.00, 523.25,
+        392.00, 329.63, 293.66, 349.23,
+      ];
+
+      function scheduleNote(time, freq, dur){
+        const osc = audioCtx.createOscillator();
+        const g = audioCtx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(freq, time);
+
+        g.gain.setValueAtTime(0.0001, time);
+        g.gain.exponentialRampToValueAtTime(0.12, time + 0.01);
+        g.gain.exponentialRampToValueAtTime(0.0001, time + dur);
+
+        osc.connect(g);
+        g.connect(bgm.gain);
+
+        osc.start(time);
+        osc.stop(time + dur + 0.01);
+      }
+
+      function scheduler(){
+        if (!bgm.playing) return;
+        const lookAhead = 0.10;
+        while (bgm.nextNoteTime < audioCtx.currentTime + lookAhead){
+          const i = bgm.step % scale.length;
+          let f = scale[i];
+          if (bgm.step % 16 === 12) f *= 2;
+
+          const dur = (bgm.step % 8 === 6) ? stepDur * 0.65 : stepDur * 0.85;
+          scheduleNote(bgm.nextNoteTime, f, dur);
+
+          bgm.nextNoteTime += stepDur;
+          bgm.step++;
+        }
+      }
+
+      bgm.timer = setInterval(scheduler, 25);
+    } catch {}
+  }
+
   // ----------------------------
-  // AdSense fallback (간단)
+  // Ad fallback
   // ----------------------------
   function setupAdFallback(){
     let hasRealAd = false;
@@ -436,6 +568,7 @@
     return true;
   }
 
+  // overlap-safe move
   function applyClusterMoveOverlapSafe(members, toAnchorPos){
     const old = board.slice();
     const srcPositions = members.map(m => m.pos);
@@ -466,7 +599,14 @@
     board = next;
   }
 
-  // Render
+  // Pop effect
+  function popScaleForTile(tileId){
+    const t = tilePop.get(tileId);
+    if (!t) return 1;
+    const a = Math.max(0, Math.min(1, 1 - (t / POP_DUR)));
+    return 1 + POP_MAG * Math.sin(a * Math.PI);
+  }
+
   function render(dt){
     ctx.clearRect(0,0,canvas.width,canvas.height);
     ctx.fillStyle = "#0b0b0c";
@@ -496,13 +636,25 @@
     const draggingPosSet = new Set(dragging ? dragging.members.map(m => m.pos) : []);
     for (let pos=0; pos<N*N; pos++){
       if (draggingPosSet.has(pos)) continue;
+
       const tileId = board[pos];
       const { r, c } = rc(pos);
       const x0 = br.x + c*cell + TILE_GAP/2;
       const y0 = br.y + r*cell + TILE_GAP/2;
       const w0 = cell - TILE_GAP;
       const h0 = cell - TILE_GAP;
-      drawTile(tileId, x0, y0, w0, h0);
+
+      const s = popScaleForTile(tileId);
+      const cx = x0 + w0/2;
+      const cy = y0 + h0/2;
+      const w = w0 * s;
+      const h = h0 * s;
+
+      ctx.save();
+      ctx.translate(cx - w/2, cy - h/2);
+      drawTile(tileId, 0, 0, w, h);
+      ctx.restore();
+
       ctx.strokeStyle = "rgba(255,255,255,0.06)";
       ctx.lineWidth = 1;
       ctx.strokeRect(x0+0.5, y0+0.5, w0-1, h0-1);
@@ -540,7 +692,15 @@
   function loop(now){
     const dt = Math.min(0.033, (now - last)/1000);
     last = now;
+
+    for (const [id, t] of tilePop.entries()){
+      const nt = t - dt;
+      if (nt <= 0) tilePop.delete(id);
+      else tilePop.set(id, nt);
+    }
+
     if (hintTimer > 0) hintTimer = Math.max(0, hintTimer - dt);
+
     render(dt);
     requestAnimationFrame(loop);
   }
@@ -557,6 +717,9 @@
   function onPointerDown(evt){
     if (!sourceImage || isLoading) return;
     if (activePointerId != null) return;
+
+    // ✅ 모바일에서 오디오 unlock + BGM 시작
+    startBgmIfNeeded();
 
     activePointerId = evt.pointerId;
     canvas.setPointerCapture(activePointerId);
@@ -580,8 +743,6 @@
       mouseY: p.y,
       grabDX: (p.x - gx),
       grabDY: (p.y - gy),
-      hoverAnchorPos: pos,
-      fits: true
     };
 
     evt.preventDefault();
@@ -595,10 +756,6 @@
     dragging.mouseX = p.x;
     dragging.mouseY = p.y;
 
-    const hoverPos = posFromPoint(p.x, p.y);
-    dragging.hoverAnchorPos = hoverPos;
-    dragging.fits = (hoverPos != null) ? clusterFitsAt(dragging.members, hoverPos) : false;
-
     evt.preventDefault();
   }
 
@@ -610,18 +767,27 @@
     const p = getCanvasPointFromPointer(evt);
     const dropAnchorPos = posFromPoint(p.x, p.y);
 
+    // move
     if (dropAnchorPos != null &&
         dropAnchorPos !== dragging.anchorPos &&
         clusterFitsAt(dragging.members, dropAnchorPos)) {
       applyClusterMoveOverlapSafe(dragging.members, dropAnchorPos);
     }
 
+    // 착붙 팝(간단): 이동 후 클러스터가 2개 이상이면 팝 + chime
+    // (원래 “성장 조건” 로직이 있으면 여기 대신 그 로직을 넣으면 됨)
+    const cl = getCluster(dropAnchorPos ?? dragging.anchorPos);
+    if (cl.length >= 2) {
+      for (const m of cl) tilePop.set(m.tileId, POP_DUR);
+      playChime();
+    }
+
     dragging = null;
 
-    if (isSolved() && !didClearFx){
-      didClearFx = true;
+    if (isSolved()){
       lvText.textContent = `Level ${level}`;
       overlayEl.style.display = "flex";
+      playClear();
     }
 
     evt.preventDefault();
@@ -632,7 +798,7 @@
   window.addEventListener("pointerup", onPointerUp, { passive:false });
   window.addEventListener("pointercancel", onPointerUp, { passive:false });
 
-  // Level + image loading
+  // Image loading
   function centerCropToSquare(img, size=1024){
     const off = document.createElement("canvas");
     off.width = off.height = size;
@@ -685,8 +851,9 @@
     resetBoard();
     shuffleBoard();
 
+    tilePop.clear();
     dragging = null;
-    didClearFx = false;
+
     hintTimer = START_HINT_SEC;
     overlayEl.style.display = "none";
   }
