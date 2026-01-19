@@ -16,7 +16,8 @@
 
   <style>
     :root{
-      --banner-h: 100px; /* ✅ 320x100 배너 기준 */
+      --banner-h: 100px; /* 320x100 배너 기준 */
+      --topbar-h: 52px;  /* 상단바 높이 */
     }
 
     html, body {
@@ -25,10 +26,11 @@
       background:#0f0f10;
       color:#eee;
       font-family:system-ui, sans-serif;
-
-      /* ✅ 배너 높이만큼 여백(하단 고정 배너가 게임을 가리지 않게) */
-      padding-bottom: calc(var(--banner-h) + env(safe-area-inset-bottom, 0px));
       box-sizing: border-box;
+
+      /* ✅ 하단 배너 + 상단바 여백 */
+      padding-bottom: calc(var(--banner-h) + env(safe-area-inset-bottom, 0px));
+      padding-top: calc(var(--topbar-h) + env(safe-area-inset-top, 0px));
 
       overscroll-behavior: none;
       touch-action: none;
@@ -92,16 +94,7 @@
     .btn:hover { filter:brightness(0.95); }
     .btn:active { transform: translateY(1px); }
 
-    /* ✅ Audio toggles */
-    .hud {
-      position: absolute;
-      top: 10px;
-      right: 10px;
-      display:flex;
-      gap:8px;
-      z-index: 50;
-      pointer-events: auto;
-    }
+    /* ✅ pill button (BGM/SFX) */
     .pill {
       user-select:none;
       -webkit-tap-highlight-color: transparent;
@@ -115,6 +108,7 @@
       font-size: 12px;
       cursor:pointer;
       backdrop-filter: blur(6px);
+      color:#fff;
     }
     .dot {
       width:10px; height:10px; border-radius:99px;
@@ -123,6 +117,32 @@
     }
     .pill.on .dot { background: rgba(110,255,170,0.75); }
     .pill.off { opacity: 0.72; }
+
+    /* ✅ TOPBAR (캔버스 밖, 페이지 상단 고정) */
+    #topbar{
+      position: fixed;
+      left: 0; right: 0;
+      top: 0;
+      height: calc(var(--topbar-h) + env(safe-area-inset-top, 0px));
+      padding-top: env(safe-area-inset-top, 0px);
+      background: rgba(0,0,0,0.55);
+      border-bottom: 1px solid rgba(255,255,255,0.12);
+      backdrop-filter: blur(6px);
+      z-index: 10000;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+    }
+    #topbar .topbar-inner{
+      width: min(720px, 96vw);
+      display:flex;
+      justify-content:flex-end;
+      gap: 8px;
+      padding: 0 12px;
+      box-sizing:border-box;
+      height: var(--topbar-h);
+      align-items:center;
+    }
 
     /* ✅ 하단 고정 AdSense 배너 */
     #bottom-banner {
@@ -151,7 +171,6 @@
       position: relative;
     }
 
-    /* AdSense 컨테이너 */
     #bottom-banner ins.adsbygoogle {
       display:block;
       width: 100%;
@@ -174,19 +193,21 @@
 </head>
 
 <body>
+  <!-- ✅ TOPBAR DOM (캔버스 밖으로 올림) -->
+  <div id="topbar">
+    <div class="topbar-inner">
+      <div class="pill on" id="bgmToggle" role="button" aria-label="BGM toggle">
+        <span class="dot"></span><span>BGM</span>
+      </div>
+      <div class="pill on" id="sfxToggle" role="button" aria-label="SFX toggle">
+        <span class="dot"></span><span>SFX</span>
+      </div>
+    </div>
+  </div>
+
   <div class="app">
     <div class="stage">
       <canvas id="c" width="720" height="720"></canvas>
-
-      <!-- HUD: audio toggles -->
-      <div class="hud">
-        <div class="pill on" id="bgmToggle" role="button" aria-label="BGM toggle">
-          <span class="dot"></span><span>BGM</span>
-        </div>
-        <div class="pill on" id="sfxToggle" role="button" aria-label="SFX toggle">
-          <span class="dot"></span><span>SFX</span>
-        </div>
-      </div>
 
       <div class="overlay" id="overlay" style="display:none;">
         <div class="panel">
@@ -209,9 +230,10 @@
            data-ad-slot="1234567890"
            data-ad-format="rectangle"
            data-full-width-responsive="true"></ins>
+      <script>
+        (adsbygoogle = window.adsbygoogle || []).push({});
+      </script>
       -->
-
-      <!-- ✅ 폴백: 광고가 없거나 로딩 실패 시 보여줌 -->
       <div id="ad-fallback">Ad banner area (320×100)</div>
     </div>
   </div>
@@ -226,21 +248,14 @@
 
   const bgmToggleEl = document.getElementById("bgmToggle");
   const sfxToggleEl = document.getElementById("sfxToggle");
-
   const adFallbackEl = document.getElementById("ad-fallback");
 
   // ----------------------------
   // Image pool (./images/ 폴더)
   // ----------------------------
   const IMAGE_POOL = [
-    "images/01.jpg",
-    "images/02.jpg",
-    "images/03.jpg",
-    "images/04.jpg",
-    "images/05.jpg",
-    "images/06.jpg",
-    "images/07.jpg",
-    "images/08.jpg",
+    "images/01.jpg","images/02.jpg","images/03.jpg","images/04.jpg",
+    "images/05.jpg","images/06.jpg","images/07.jpg","images/08.jpg",
   ];
 
   // ----------------------------
@@ -272,7 +287,7 @@
   let board = [];
   let solved = [];
 
-  // Drag cluster state (Pointer Events)
+  // Drag cluster state
   let dragging = null;
   let activePointerId = null;
 
@@ -286,196 +301,38 @@
   let didClearFx = false;
 
   // ----------------------------
-  // Audio settings (✅ 2배 볼륨)
+  // Audio toggles only (BGM 구현은 보류)
   // ----------------------------
-  let audioCtx = null;
   let master = { bgmOn:true, sfxOn:true };
-
-  // 기존 대비 2배 정도 키움
-  const SFX_GAIN = 0.36;  // (기존 0.18 정도였던 느낌) *2
-  const CLEAR_GAIN = 0.44;
-  const BGM_GAIN = 0.11;  // (기존 0.055) *2
-
-  let bgm = {
-    playing: false,
-    gain: null,
-    nextNoteTime: 0,
-    step: 0,
-    timer: null
-  };
-
-  function ensureAudio(){
-    if (!audioCtx){
-      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    }
-    if (audioCtx.state === "suspended") audioCtx.resume();
-  }
 
   function setToggleUI(el, on){
     el.classList.toggle("on", on);
     el.classList.toggle("off", !on);
   }
-
   setToggleUI(bgmToggleEl, master.bgmOn);
   setToggleUI(sfxToggleEl, master.sfxOn);
 
   bgmToggleEl.addEventListener("click", () => {
     master.bgmOn = !master.bgmOn;
     setToggleUI(bgmToggleEl, master.bgmOn);
-    // gain만 조절해서 즉시 반영
-    if (bgm.gain) bgm.gain.gain.value = master.bgmOn ? BGM_GAIN : 0.0001;
   });
-
   sfxToggleEl.addEventListener("click", () => {
     master.sfxOn = !master.sfxOn;
     setToggleUI(sfxToggleEl, master.sfxOn);
   });
 
-  // 착붙: 크리링~
-  function playChime(){
-    if (!master.sfxOn) return;
-    try{
-      ensureAudio();
-      const t0 = audioCtx.currentTime;
-      const notes = [
-        { f: 1568, t: 0.00, d: 0.10 },
-        { f: 1319, t: 0.07, d: 0.12 },
-      ];
-      for (const n of notes){
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
-        osc.type = "sine";
-        osc.frequency.setValueAtTime(n.f, t0 + n.t);
-
-        gain.gain.setValueAtTime(0.0001, t0 + n.t);
-        gain.gain.exponentialRampToValueAtTime(SFX_GAIN, t0 + n.t + 0.015);
-        gain.gain.exponentialRampToValueAtTime(0.0001, t0 + n.t + n.d);
-
-        osc.connect(gain);
-        gain.connect(audioCtx.destination);
-        osc.start(t0 + n.t);
-        osc.stop(t0 + n.t + n.d + 0.02);
-      }
-    } catch {}
-  }
-
-  // 클리어: 뾰로롱~
-  function playClear(){
-    if (!master.sfxOn) return;
-    try{
-      ensureAudio();
-      const t0 = audioCtx.currentTime;
-      const seq = [
-        { f: 1046.5, t: 0.00, d: 0.12 },
-        { f: 1318.5, t: 0.10, d: 0.12 },
-        { f: 1568.0, t: 0.20, d: 0.14 },
-        { f: 2093.0, t: 0.34, d: 0.18 },
-      ];
-      for (const n of seq){
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
-        osc.type = "triangle";
-        osc.frequency.setValueAtTime(n.f, t0 + n.t);
-
-        gain.gain.setValueAtTime(0.0001, t0 + n.t);
-        gain.gain.exponentialRampToValueAtTime(CLEAR_GAIN, t0 + n.t + 0.02);
-        gain.gain.exponentialRampToValueAtTime(0.0001, t0 + n.t + n.d);
-
-        osc.detune.setValueAtTime(-6, t0 + n.t);
-        osc.detune.linearRampToValueAtTime(6, t0 + n.t + n.d);
-
-        osc.connect(gain);
-        gain.connect(audioCtx.destination);
-        osc.start(t0 + n.t);
-        osc.stop(t0 + n.t + n.d + 0.03);
-      }
-    } catch {}
-  }
-
-  // ✅ BGM: 밝고 발랄한 루프 (간단 시퀀서)
-  function startBgmIfNeeded(){
-    try{
-      ensureAudio();
-      if (bgm.playing) return;
-
-      bgm.gain = audioCtx.createGain();
-      bgm.gain.gain.value = master.bgmOn ? BGM_GAIN : 0.0001;
-      bgm.gain.connect(audioCtx.destination);
-
-      bgm.playing = true;
-      bgm.step = 0;
-      bgm.nextNoteTime = audioCtx.currentTime + 0.05;
-
-      const tempo = 132;
-      const spb = 60 / tempo;
-      const stepDur = spb / 2;
-
-      const scale = [
-        261.63, 329.63, 392.00, 523.25,
-        392.00, 329.63, 293.66, 349.23,
-      ];
-
-      function scheduleNote(time, freq, dur){
-        const osc = audioCtx.createOscillator();
-        const g = audioCtx.createGain();
-        osc.type = "sine";
-        osc.frequency.setValueAtTime(freq, time);
-
-        g.gain.setValueAtTime(0.0001, time);
-        g.gain.exponentialRampToValueAtTime(0.12, time + 0.01);
-        g.gain.exponentialRampToValueAtTime(0.0001, time + dur);
-
-        osc.connect(g);
-        g.connect(bgm.gain);
-
-        osc.start(time);
-        osc.stop(time + dur + 0.01);
-      }
-
-      function scheduler(){
-        if (!bgm.playing) return;
-        const lookAhead = 0.10;
-        while (bgm.nextNoteTime < audioCtx.currentTime + lookAhead){
-          const i = bgm.step % scale.length;
-          let f = scale[i];
-          if (bgm.step % 16 === 12) f *= 2;
-
-          const dur = (bgm.step % 8 === 6) ? stepDur * 0.65 : stepDur * 0.85;
-          scheduleNote(bgm.nextNoteTime, f, dur);
-
-          bgm.nextNoteTime += stepDur;
-          bgm.step++;
-        }
-      }
-
-      bgm.timer = setInterval(scheduler, 25);
-    } catch {}
-  }
-
   // ----------------------------
-  // AdSense fallback handler
+  // AdSense fallback (간단)
   // ----------------------------
   function setupAdFallback(){
-    // 기본은 fallback 표시.
-    // 광고가 실제로 채워지면 숨김.
     let hasRealAd = false;
-
     function check(){
       const ins = document.querySelector("ins.adsbygoogle");
-      if (!ins) {
-        // AdSense 자체가 미설치/주석 상태 -> 계속 fallback
-        adFallbackEl.style.display = "flex";
-        return;
-      }
-
-      // AdSense가 채워지면 ins 내부에 iframe/children이 생기거나, 높이가 변하는 경우가 많음
+      if (!ins) { adFallbackEl.style.display = "flex"; return; }
       const filled = ins.querySelector("iframe, *") || ins.offsetHeight >= 60;
       if (filled) hasRealAd = true;
-
       adFallbackEl.style.display = hasRealAd ? "none" : "flex";
     }
-
-    // 조금 여유 있게 여러 번 체크
     setTimeout(check, 800);
     setTimeout(check, 1800);
     setTimeout(check, 3200);
@@ -508,7 +365,6 @@
     return true;
   }
 
-  // Geometry
   function boardRect(){
     const W = canvas.width, H = canvas.height;
     const size = Math.min(W,H) - PADDING*2;
@@ -546,12 +402,9 @@
   }
 
   function getCluster(anchorPos){
-    const visited = new Set();
+    const visited = new Set([anchorPos]);
     const q = [anchorPos];
-    visited.add(anchorPos);
-    const dirs = [
-      {dr:-1,dc:0},{dr:1,dc:0},{dr:0,dc:-1},{dr:0,dc:1}
-    ];
+    const dirs = [{dr:-1,dc:0},{dr:1,dc:0},{dr:0,dc:-1},{dr:0,dc:1}];
     while (q.length){
       const p = q.shift();
       const { r, c } = rc(p);
@@ -567,12 +420,10 @@
       }
     }
     const aRC = rc(anchorPos);
-    const members = Array.from(visited).map(pos => {
+    return Array.from(visited).map(pos => {
       const prc = rc(pos);
       return { pos, tileId: board[pos], offR: prc.r - aRC.r, offC: prc.c - aRC.c };
-    });
-    members.sort((m1,m2) => (m1.offR - m2.offR) || (m1.offC - m2.offC));
-    return members;
+    }).sort((m1,m2)=>(m1.offR-m2.offR)||(m1.offC-m2.offC));
   }
 
   function clusterFitsAt(members, anchorPos){
@@ -585,7 +436,6 @@
     return true;
   }
 
-  // overlap-safe move
   function applyClusterMoveOverlapSafe(members, toAnchorPos){
     const old = board.slice();
     const srcPositions = members.map(m => m.pos);
@@ -613,130 +463,10 @@
     for (let i=0;i<k;i++){
       next[vacated[i]] = displaced[i];
     }
-
     board = next;
   }
 
-  // "착붙" 조건: 클러스터가 커졌을 때만
-  function buildLockAdjList(useBoard){
-    const saved = board;
-    if (useBoard) board = useBoard;
-
-    const adj = Array.from({length:N*N}, () => []);
-    const dirs = [
-      {dr:-1,dc:0},{dr:1,dc:0},{dr:0,dc:-1},{dr:0,dc:1}
-    ];
-    for (let r=0;r<N;r++){
-      for (let c=0;c<N;c++){
-        const p = idx(r,c);
-        for (const d of dirs){
-          const nr = r + d.dr, nc = c + d.dc;
-          if (nr<0||nr>=N||nc<0||nc>=N) continue;
-          const q = idx(nr,nc);
-          if (isLockedAdj(p, q, d)) adj[p].push(q);
-        }
-      }
-    }
-
-    if (useBoard) board = saved;
-    return adj;
-  }
-
-  function computeComponents(adj){
-    const visited = new Array(N*N).fill(false);
-    const compId = new Array(N*N).fill(-1);
-    const compSizes = [];
-    let cid = 0;
-
-    for (let i=0;i<N*N;i++){
-      if (visited[i]) continue;
-      const q = [i];
-      visited[i] = true;
-      compId[i] = cid;
-      let size = 0;
-
-      while (q.length){
-        const p = q.shift();
-        size++;
-        for (const nb of adj[p]){
-          if (!visited[nb]){
-            visited[nb] = true;
-            compId[nb] = cid;
-            q.push(nb);
-          }
-        }
-      }
-      compSizes[cid] = size;
-      cid++;
-    }
-    return { compId, compSizes };
-  }
-
-  function triggerPop(tileIds){
-    if (tileIds.size === 0) return;
-    for (const id of tileIds) tilePop.set(id, POP_DUR);
-    playChime();
-  }
-
-  // Clear fireworks
-  function spawnFireworks(){
-    const W = canvas.width, H = canvas.height;
-    const cx = W/2, cy = H/2;
-
-    const bursts = 8;
-    for (let b=0; b<bursts; b++){
-      const bx = cx + (Math.random()*160 - 80);
-      const by = cy + (Math.random()*120 - 60);
-      const count = 22 + Math.floor(Math.random()*18);
-
-      for (let i=0;i<count;i++){
-        const ang = Math.random()*Math.PI*2;
-        const sp = 120 + Math.random()*180;
-        fireworks.push({
-          x: bx, y: by,
-          vx: Math.cos(ang)*sp,
-          vy: Math.sin(ang)*sp,
-          life: 0,
-          maxLife: 0.75 + Math.random()*0.45,
-          size: 1.2 + Math.random()*1.8
-        });
-      }
-    }
-  }
-
-  function renderFireworks(dt){
-    if (fireworks.length === 0) return;
-    const g = 520;
-    for (const p of fireworks){
-      p.life += dt;
-      p.vy += g * dt;
-      p.x += p.vx * dt;
-      p.y += p.vy * dt;
-      p.vx *= (1 - 1.2*dt);
-      p.vy *= (1 - 0.2*dt);
-    }
-    fireworks = fireworks.filter(p => p.life < p.maxLife);
-
-    ctx.save();
-    for (const p of fireworks){
-      const t = p.life / p.maxLife;
-      const a = Math.max(0, 1 - t);
-      const twinkle = 0.6 + 0.4*Math.sin((p.life*18) + (p.x+p.y)*0.01);
-      ctx.globalAlpha = a * twinkle;
-      ctx.fillStyle = (Math.random() < 0.08) ? "rgba(255,220,140,1)" : "rgba(255,255,255,1)";
-      ctx.fillRect(p.x, p.y, p.size, p.size);
-    }
-    ctx.restore();
-  }
-
-  // Rendering
-  function popScaleForTile(tileId){
-    const t = tilePop.get(tileId);
-    if (!t) return 1;
-    const a = Math.max(0, Math.min(1, 1 - (t / POP_DUR)));
-    return 1 + POP_MAG * Math.sin(a * Math.PI);
-  }
-
+  // Render
   function render(dt){
     ctx.clearRect(0,0,canvas.width,canvas.height);
     ctx.fillStyle = "#0b0b0c";
@@ -755,7 +485,6 @@
 
     const cell = br.size / N;
 
-    // start hint
     if (hintTimer > 0){
       const alpha = Math.min(0.22, (hintTimer / START_HINT_SEC) * 0.22);
       ctx.save();
@@ -765,52 +494,23 @@
     }
 
     const draggingPosSet = new Set(dragging ? dragging.members.map(m => m.pos) : []);
-
     for (let pos=0; pos<N*N; pos++){
       if (draggingPosSet.has(pos)) continue;
-
       const tileId = board[pos];
       const { r, c } = rc(pos);
       const x0 = br.x + c*cell + TILE_GAP/2;
       const y0 = br.y + r*cell + TILE_GAP/2;
       const w0 = cell - TILE_GAP;
       const h0 = cell - TILE_GAP;
-
-      const s = popScaleForTile(tileId);
-      const cx = x0 + w0/2;
-      const cy = y0 + h0/2;
-      const w = w0 * s;
-      const h = h0 * s;
-
-      ctx.save();
-      ctx.translate(cx - w/2, cy - h/2);
-      drawTile(tileId, 0, 0, w, h);
-      ctx.restore();
-
+      drawTile(tileId, x0, y0, w0, h0);
       ctx.strokeStyle = "rgba(255,255,255,0.06)";
       ctx.lineWidth = 1;
       ctx.strokeRect(x0+0.5, y0+0.5, w0-1, h0-1);
     }
 
-    // dragging cluster
     if (dragging){
       const baseX = dragging.mouseX - dragging.grabDX;
       const baseY = dragging.mouseY - dragging.grabDY;
-
-      if (dragging.hoverAnchorPos != null && dragging.fits){
-        const aRC = rc(dragging.hoverAnchorPos);
-        ctx.save();
-        ctx.globalAlpha = 0.14;
-        ctx.fillStyle = "#fff";
-        for (const m of dragging.members){
-          const rr = aRC.r + m.offR;
-          const cc = aRC.c + m.offC;
-          const x = br.x + cc*cell + TILE_GAP/2;
-          const y = br.y + rr*cell + TILE_GAP/2;
-          ctx.fillRect(x, y, cell - TILE_GAP, cell - TILE_GAP);
-        }
-        ctx.restore();
-      }
 
       ctx.save();
       ctx.globalAlpha = 0.28;
@@ -834,30 +534,19 @@
       }
       ctx.restore();
     }
-
-    renderFireworks(dt);
   }
 
-  // Main loop
   let last = performance.now();
   function loop(now){
     const dt = Math.min(0.033, (now - last)/1000);
     last = now;
-
-    for (const [id, t] of tilePop.entries()){
-      const nt = t - dt;
-      if (nt <= 0) tilePop.delete(id);
-      else tilePop.set(id, nt);
-    }
-
     if (hintTimer > 0) hintTimer = Math.max(0, hintTimer - dt);
-
     render(dt);
     requestAnimationFrame(loop);
   }
   requestAnimationFrame(loop);
 
-  // Pointer Events input
+  // Pointer input
   function getCanvasPointFromPointer(evt){
     const rect = canvas.getBoundingClientRect();
     const x = (evt.clientX - rect.left) * (canvas.width / rect.width);
@@ -868,9 +557,6 @@
   function onPointerDown(evt){
     if (!sourceImage || isLoading) return;
     if (activePointerId != null) return;
-
-    // ✅ 첫 입력에서 BGM 시작(브라우저 정책 대응)
-    startBgmIfNeeded();
 
     activePointerId = evt.pointerId;
     canvas.setPointerCapture(activePointerId);
@@ -919,20 +605,11 @@
   function onPointerUp(evt){
     if (evt.pointerId !== activePointerId) return;
     activePointerId = null;
-
     if (!dragging) return;
 
     const p = getCanvasPointFromPointer(evt);
     const dropAnchorPos = posFromPoint(p.x, p.y);
 
-    const oldBoard = board.slice();
-    const draggedTileIds = new Set(dragging.members.map(m => m.tileId));
-
-    // before comps
-    const beforeAdj = buildLockAdjList(oldBoard);
-    const beforeInfo = computeComponents(beforeAdj);
-
-    // move
     if (dropAnchorPos != null &&
         dropAnchorPos !== dragging.anchorPos &&
         clusterFitsAt(dragging.members, dropAnchorPos)) {
@@ -941,52 +618,10 @@
 
     dragging = null;
 
-    // after comps
-    const afterAdj = buildLockAdjList(null);
-    const afterInfo = computeComponents(afterAdj);
-
-    // tileId -> pos maps
-    const beforePos = new Map();
-    for (let pos=0; pos<N*N; pos++) beforePos.set(oldBoard[pos], pos);
-    const afterPos = new Map();
-    for (let pos=0; pos<N*N; pos++) afterPos.set(board[pos], pos);
-
-    // growth detect
-    let grew = false;
-    const compsToPop = new Set();
-    for (const tileId of draggedTileIds){
-      const pBefore = beforePos.get(tileId);
-      const pAfter = afterPos.get(tileId);
-      if (pBefore == null || pAfter == null) continue;
-
-      const cBefore = beforeInfo.compId[pBefore];
-      const sBefore = beforeInfo.compSizes[cBefore] || 1;
-
-      const cAfter = afterInfo.compId[pAfter];
-      const sAfter = afterInfo.compSizes[cAfter] || 1;
-
-      if (sAfter > sBefore){
-        grew = true;
-        compsToPop.add(cAfter);
-      }
-    }
-
-    if (grew){
-      const popTileIds = new Set();
-      for (let pos=0; pos<N*N; pos++){
-        const cid = afterInfo.compId[pos];
-        if (compsToPop.has(cid)) popTileIds.add(board[pos]);
-      }
-      triggerPop(popTileIds);
-    }
-
-    // solved?
     if (isSolved() && !didClearFx){
       didClearFx = true;
       lvText.textContent = `Level ${level}`;
       overlayEl.style.display = "flex";
-      spawnFireworks();
-      playClear();
     }
 
     evt.preventDefault();
@@ -1050,12 +685,8 @@
     resetBoard();
     shuffleBoard();
 
-    tilePop.clear();
     dragging = null;
-
-    fireworks = [];
     didClearFx = false;
-
     hintTimer = START_HINT_SEC;
     overlayEl.style.display = "none";
   }
@@ -1064,9 +695,9 @@
     await startLevel(level + 1);
   });
 
-  // Boot
   startLevel(level);
 })();
 </script>
 </body>
 </html>
+```
