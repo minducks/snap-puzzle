@@ -272,6 +272,7 @@
 (() => {
   const VERSION = "0.00.12";
   const TOTAL_LEVELS = 30;
+  const ASSET_VERSION = "20260120-5";
 
   const canvas = document.getElementById("c");
   const ctx = canvas.getContext("2d");
@@ -996,7 +997,7 @@
         isLoading = false;
         resolve(false);
       };
-      img.src = url;
+      img.src = url + (url.includes("?") ? "&" : "?") + "v=" + ASSET_VERSION;
     });
   }
 
@@ -1037,4 +1038,5 @@
 </script>
 </body>
 </html>
+
 
